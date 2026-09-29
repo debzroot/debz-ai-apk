@@ -52,6 +52,9 @@ public final class RootfsManager {
 
     public static void ensureFromAssets(Context ctx, Progress cb) throws Exception {
         healNested(ctx);
+        if (ready(ctx) && !new File(dir(ctx), "bin/sh").exists()) {
+            wipe(ctx);
+        }
         if (ready(ctx)) return;
         String asset = bundledName(ctx);
         if (asset == null) throw new Exception("rootfs tidak dibundle di APK");
@@ -193,7 +196,25 @@ public final class RootfsManager {
                     throw new Exception("path traversal: " + e.getName());
                 }
                 if (e.isDirectory()) {
+                    if (f.exists() && !f.isDirectory()) f.delete();
                     f.mkdirs();
+                } else if (e.isSymbolicLink()) {
+                    f.getParentFile().mkdirs();
+                    try {
+                        java.nio.file.Files.createSymbolicLink(
+                            f.toPath(), java.nio.file.Paths.get(e.getLinkName()));
+                    } catch (java.nio.file.FileAlreadyExistsException ignored) {}
+                } else if (e.isLink()) {
+                    f.getParentFile().mkdirs();
+                    java.nio.file.Path target =
+                        dest.toPath().resolve(e.getLinkName()).normalize();
+                    if (!target.startsWith(dest.toPath())) {
+                        throw new Exception("hardlink traversal: " + e.getName());
+                    }
+                    try {
+                        java.nio.file.Files.createLink(f.toPath(), target);
+                    } catch (java.nio.file.FileAlreadyExistsException
+                            | java.nio.file.NoSuchFileException ignored) {}
                 } else {
                     f.getParentFile().mkdirs();
                     try (OutputStream o = new FileOutputStream(f)) {
