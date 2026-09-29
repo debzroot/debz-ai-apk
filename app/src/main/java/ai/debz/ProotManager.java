@@ -1,21 +1,52 @@
 package ai.debz;
 
 import android.content.Context;
+import android.os.Build;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 public final class ProotManager {
     private ProotManager() {}
 
-    public static File binary(Context ctx) {
+    public static File binary(Context ctx) throws Exception {
         File f = new File(ctx.getApplicationInfo().nativeLibraryDir, "libproot.so");
-        if (f.exists()) f.setExecutable(true);
-        return f;
+        if (f.exists()) {
+            f.setExecutable(true);
+            return f;
+        }
+        // installer tidak mengekstrak .so (extractNativeLibs=false):
+        // ambil dari APK sendiri ke app-private, exec dari sana.
+        String abi = Build.SUPPORTED_ABIS.length > 0
+            ? Build.SUPPORTED_ABIS[0] : "arm64-v8a";
+        File out = new File(ctx.getFilesDir(), "bin/libproot.so");
+        ZipFile apk = new ZipFile(ctx.getApplicationInfo().sourceDir);
+        try {
+            ZipEntry e = apk.getEntry("lib/" + abi + "/libproot.so");
+            if (e == null) throw new Exception("libproot.so tidak ada di APK");
+            if (!out.exists() || out.length() != e.getSize()) {
+                out.getParentFile().mkdirs();
+                try (InputStream in = apk.getInputStream(e);
+                     OutputStream o = new FileOutputStream(out)) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+                }
+            }
+        } finally {
+            apk.close();
+        }
+        out.setExecutable(true);
+        return out;
     }
 
-    public static List<String> baseArgs(Context ctx, File rootfs) {
+    public static List<String> baseArgs(Context ctx, File rootfs) throws Exception {
         List<String> a = new ArrayList<>();
         a.add(binary(ctx).getAbsolutePath());
         a.add("-r");
