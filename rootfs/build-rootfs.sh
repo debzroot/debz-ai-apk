@@ -22,9 +22,26 @@ tar -xzf "$WORK/base.tar.gz" -C "$ROOTFS"
 
 echo ">> [2/7] unduh paket arm64 (deps auto-resolve)"
 sudo dpkg --add-architecture arm64 2>/dev/null || true
-if ! grep -q ports.ubuntu.com /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
-  echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
-  echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main universe" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
+for f in /etc/apt/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  grep -q '^Architectures:' "$f" || sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' "$f"
+done
+if [ -f /etc/apt/sources.list ]; then
+  sudo sed -i 's/^deb /deb [arch=amd64] /; s/deb \[arch=amd64\] \[arch=amd64\]/deb [arch=amd64]/' /etc/apt/sources.list
+fi
+for f in /etc/apt/sources.list.d/*.list; do
+  [ -f "$f" ] || continue
+  sudo sed -i 's/^deb /deb [arch=amd64] /; s/deb \[arch=amd64\] \[arch=amd64\]/deb [arch=amd64]/' "$f"
+done
+if ! grep -q ports.ubuntu.com /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null; then
+  sudo tee /etc/apt/sources.list.d/arm64-ports.sources > /dev/null <<'EOF'
+Types: deb
+URIs: http://ports.ubuntu.com/ubuntu-ports
+Suites: noble noble-updates
+Components: main universe
+Architectures: arm64
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
 fi
 sudo apt-get update -qq
 sudo apt-get install --download-only -y --no-install-recommends \
