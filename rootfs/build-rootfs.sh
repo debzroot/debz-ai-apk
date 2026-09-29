@@ -49,12 +49,21 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 EOF
 fi
 sudo apt-get update -qq
+echo ">> [2a/7] paket inti arm64"
 sudo apt-get install --download-only -y --no-install-recommends \
   -o Dir::Cache::archives="$DEBS" \
   bash:arm64 dash:arm64 procps:arm64 \
   php8.3-fpm:arm64 php8.3-cli:arm64 \
   nginx:arm64 ca-certificates:arm64 \
-  python3:arm64 python3-pip:arm64 python3-venv:arm64
+  python3:arm64
+echo ">> [2b/7] python venv/pip (best-effort, fallback get-pip.py)"
+sudo apt-get install --download-only -y --no-install-recommends \
+  -o Dir::Cache::archives="$DEBS" \
+  python3-venv:arm64 2>/dev/null || echo "   ! python3-venv:arm64 skip, pakai ensurepip/get-pip"
+sudo apt-get install --download-only -y --no-install-recommends \
+  -o Dir::Cache::archives="$DEBS" \
+  python3-pip:arm64 2>/dev/null || echo "   ! python3-pip:arm64 skip, pakai get-pip.py"
+curl -sSL -o "$ROOTFS/opt/debz-get-pip-tmp" https://bootstrap.pypa.io/get-pip.py 2>/dev/null && mkdir -p "$ROOTFS/opt/debz" && mv "$ROOTFS/opt/debz-get-pip-tmp" "$ROOTFS/opt/debz/get-pip.py" || echo "   ! get-pip.py gagal diunduh, first-boot pakai ensurepip"
 sudo chown -R "$(id -u):$(id -g)" "$DEBS"
 
 echo ">> [3/7] unpack .deb ke rootfs"
