@@ -51,6 +51,7 @@ public final class RootfsManager {
     }
 
     public static void ensureFromAssets(Context ctx, Progress cb) throws Exception {
+        healNested(ctx);
         if (ready(ctx)) return;
         String asset = bundledName(ctx);
         if (asset == null) throw new Exception("rootfs tidak dibundle di APK");
@@ -71,6 +72,24 @@ public final class RootfsManager {
         if (!marker(ctx).createNewFile()) throw new Exception("marker gagal");
         pkg.delete();
         if (cb != null) cb.on("done", 100);
+    }
+
+    // tarball lama nyarang: skrip di opt/debz/opt-debz, bukan opt/debz.
+    // Flatten (rename, milidetik) biar extract 411MB nggak keulang sia-sia.
+    private static void healNested(Context ctx) {
+        File outer = new File(dir(ctx), "opt/debz");
+        File inner = new File(outer, "opt-debz");
+        if (!inner.isDirectory() || new File(outer, "start-stack.sh").exists()) return;
+        File[] kids = inner.listFiles();
+        if (kids == null) return;
+        for (File k : kids) {
+            File dst = new File(outer, k.getName());
+            if (dst.exists()) continue;
+            if (k.renameTo(dst) && dst.getName().endsWith(".sh")) {
+                dst.setExecutable(true);
+            }
+        }
+        inner.delete();
     }
 
     // "hash  filename" ala sha256sum; null kalau tak terbaca

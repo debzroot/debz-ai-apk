@@ -47,7 +47,10 @@ pip download --dest "$WHEELS" \
   flask flask-cors flask-sock requests rich prompt_toolkit beautifulsoup4
 
 echo ">> [6/7] payload /opt/debz + app opsional"
-cp -r "$SCRIPT_DIR/opt-debz" "$ROOTFS/opt/debz"
+# trailing /. : copy ISI opt-debz, jangan pernah nested (opt/debz/opt-debz)
+# — step 2b sudah bikin $ROOTFS/opt/debz duluan buat get-pip.py
+mkdir -p "$ROOTFS/opt/debz"
+cp -r "$SCRIPT_DIR/opt-debz/." "$ROOTFS/opt/debz/"
 if [ -n "$APP_SRC_DIR" ] && [ -d "$APP_SRC_DIR" ]; then
   echo "   + app payload dari $APP_SRC_DIR"
   mkdir -p "$ROOTFS/opt/debz/app"
