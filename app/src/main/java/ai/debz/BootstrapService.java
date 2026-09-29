@@ -34,10 +34,16 @@ public class BootstrapService extends Service {
 
             String url = DebzConfig.rootfsUrl(ctx);
             String sha = ""; // TODO: isi dari OTA manifest
-            if (!url.isEmpty() && !RootfsManager.ready(ctx)) {
-                DebzConfig.setStatus(ctx, "download-rootfs");
-                RootfsManager.ensure(ctx, url, sha, DebzConfig.token(ctx),
-                    (stage, pct) -> DebzConfig.setStatus(ctx, stage + ":" + pct));
+            if (!RootfsManager.ready(ctx)) {
+                if (RootfsManager.hasBundled(ctx)) {
+                    DebzConfig.setStatus(ctx, "extract-rootfs");
+                    RootfsManager.ensureFromAssets(ctx,
+                        (stage, pct) -> DebzConfig.setStatus(ctx, stage + ":" + pct));
+                } else if (!url.isEmpty()) {
+                    DebzConfig.setStatus(ctx, "download-rootfs");
+                    RootfsManager.ensure(ctx, url, sha, DebzConfig.token(ctx),
+                        (stage, pct) -> DebzConfig.setStatus(ctx, stage + ":" + pct));
+                }
             }
             if (RootfsManager.ready(ctx)) {
                 DebzConfig.setStatus(ctx, "starting-stack");

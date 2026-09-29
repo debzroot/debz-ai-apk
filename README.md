@@ -3,8 +3,10 @@
 Hybrid Android APK buat **debz-ai**: cangkang native (WebView + terminal + service)
 + backend di **proot-mini** + update kode via **OTA app-layer** (tanpa rebuild APK).
 
-Status: **scaffold** — struktur kompilabel, modul inti nyata
-(`PortManager`, `RootDetector`), sisanya stub bertahap.
+Status: **0.2.0-run** — install langsung jalan offline. Rootfs-mini
+(~130MB) dibundle di APK assets, backend debz-ai + provider opencode-cli
+(tanpa API key) kebake di rootfs. Pertama buka: ekstrak otomatis →
+stack up (php-fpm + nginx + opencode serve) → WebView ke backend lokal.
 
 ## Arsitektur
 
@@ -20,5 +22,24 @@ Status: **scaffold** — struktur kompilabel, modul inti nyata
 
 ## Build lokal / CI
 
-CI (`.github/workflows/android.yml`) build `app-debug.apk` otomatis tiap push.
+CI (`.github/workflows/build.yml`): job `rootfs` → job `android` (needs).
 Artefak ada di tab Actions → run → Artifacts.
+
+### Wajib: secret OPENCODE_SESSION_ID
+
+Provider opencode-cli otentikasi via header `x-session-id` (tanpa API key).
+Repo menyimpan placeholder `__OPENCODE_SESSION_ID__`, CI inject dari secret:
+
+1. Salin `x-session-id` dari `.ai-providers.json` di mesin dev.
+2. GitHub repo → Settings → Secrets → Actions → New secret
+   `OPENCODE_SESSION_ID` = nilainya.
+3. Tanpa secret: APK tetap kebuild, tapi chat 401.
+
+### Alur first-run di HP
+
+1. Install APK → buka → `BootstrapService` ekstrak rootfs dari assets
+   (tanpa download, tanpa token) → status `extract-rootfs`.
+2. `StackSupervisor` jalanin `first-boot-pip.sh` (bootstrap pip +
+   install wheels offline) → `start-stack.sh`
+   (php-fpm + nginx serve `/opt/debz/app` + opencode serve di port API).
+3. WebView load backend lokal → login password `1337` → chat langsung jalan.

@@ -34,6 +34,40 @@ public final class RootfsManager {
         return marker(ctx).exists() && new File(dir(ctx), "opt/debz/start-stack.sh").exists();
     }
 
+    public static boolean hasBundled(Context ctx) {
+        try {
+            for (String n : ctx.getAssets().list("")) {
+                if ("rootfs-mini.tar.gz".equals(n)) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    public static void ensureFromAssets(Context ctx, Progress cb) throws Exception {
+        if (ready(ctx)) return;
+        File d = dir(ctx);
+        d.mkdirs();
+        File tgz = new File(d, "rootfs-mini.tar.gz");
+        try (InputStream in = ctx.getAssets().open("rootfs-mini.tar.gz");
+             OutputStream out = new FileOutputStream(tgz)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        if (cb != null) cb.on("copy", 50);
+        String sha = "";
+        try (InputStream in = ctx.getAssets().open("SHA256SUMS")) {
+            byte[] b = new byte[256];
+            int n = in.read(b);
+            if (n > 0) sha = new String(b, 0, n, "UTF-8").trim().split("\\s+")[0];
+        } catch (Exception ignored) {}
+        verify(tgz, sha, cb);
+        extract(tgz, d, cb);
+        if (!marker(ctx).createNewFile()) throw new Exception("marker gagal");
+        tgz.delete();
+        if (cb != null) cb.on("done", 100);
+    }
+
     public static void ensure(Context ctx, String url, String sha256,
                               String token, Progress cb) throws Exception {
         if (ready(ctx)) return;

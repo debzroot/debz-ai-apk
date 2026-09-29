@@ -6,7 +6,7 @@ http {
     access_log /opt/debz/logs/nginx-access.log;
     server {
         listen @WEB@;
-        root /opt/debz/www;
+        root /opt/debz/app;
         index index.html index.php;
         location / {
             try_files $uri $uri/ =404;

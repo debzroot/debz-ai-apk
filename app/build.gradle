@@ -10,8 +10,13 @@ android {
         applicationId = "ai.debz"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-scaffold"
+        versionCode = 2
+        versionName = "0.2.0-run"
+    }
+
+    // rootfs-mini.tar.gz dibundle di assets — jangan dikompres ulang
+    aaptOptions {
+        noCompress "tar.gz"
     }
 
     buildTypes {

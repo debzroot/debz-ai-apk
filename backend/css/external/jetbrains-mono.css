@@ -1,0 +1,10 @@
+/* JetBrains Mono — variable font (latin), self-hosted.
+   Pengganti Saira untuk semua teks kode/mono. Monospace asli
+   = karakter selebar sama -> hasil copy/paste kode tetap presisi. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("assets/jetbrains-mono-latin.woff2") format('woff2');
+}

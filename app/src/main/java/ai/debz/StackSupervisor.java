@@ -18,7 +18,7 @@ public final class StackSupervisor {
         env.put("PORT_WEB", String.valueOf(web));
         env.put("PORT_API", String.valueOf(api));
         env.put("PORT_FPM", String.valueOf(fpm));
-        env.put("START_OPENCODE", "0");
+        env.put("START_OPENCODE", "1");
         return env;
     }
 

@@ -13,6 +13,8 @@ OUT="${OUT:-$(pwd)/out}"
 ROOTFS="$WORK/rootfs"
 DEBS="$WORK/debs"
 WHEELS="$ROOTFS/opt/wheels"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_SRC_DIR="${APP_SRC_DIR:-$SCRIPT_DIR/../backend}"
 
 mkdir -p "$WORK" "$OUT" "$DEBS" "$ROOTFS"
 
@@ -21,10 +23,9 @@ curl -sSL -o "$WORK/base.tar.gz" "$UBUNTU_BASE_URL"
 tar -xzf "$WORK/base.tar.gz" -C "$ROOTFS"
 
 echo ">> [2/7] unduh paket arm64 langsung dari ports (tanpa apt host)"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 "$SCRIPT_DIR/fetch-arm64-debs.py" "$DEBS" \
   bash dash procps \
-  php8.3-fpm php8.3-cli \
+  php8.3-fpm php8.3-cli php8.3-curl php8.3-sqlite3 php8.3-mbstring \
   nginx ca-certificates \
   python3 python3-venv
 echo ">> [2b/7] get-pip.py bootstrap"
@@ -46,7 +47,6 @@ pip download --dest "$WHEELS" \
   flask flask-cors flask-sock requests rich prompt_toolkit beautifulsoup4
 
 echo ">> [6/7] payload /opt/debz + app opsional"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp -r "$SCRIPT_DIR/opt-debz" "$ROOTFS/opt/debz"
 if [ -n "$APP_SRC_DIR" ] && [ -d "$APP_SRC_DIR" ]; then
   echo "   + app payload dari $APP_SRC_DIR"
