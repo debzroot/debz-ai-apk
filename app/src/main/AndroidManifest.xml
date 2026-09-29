@@ -6,9 +6,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- NOLIST: rootfs 130MB + cache webui semua di app-private storage (getFilesDir),
-         jadi uninstall = Android yang beresin, nol sisa di /sdcard. Jangan nambah
-         permission storage di sini; itu yang bikin "uninstall bersih total" goyah. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- Storage DIBUTUHKAN: bind /sdcard -> /mnt/sdcard di proot cuma jalan kalau
+         uid app boleh baca storage. API 26-32: READ (+WRITE max 28). API 30+:
+         MANAGE_EXTERNAL_STORAGE via Settings (sideload, bukan Play).
+         Data app sendiri (rootfs 130MB, cache) tetap di app-private storage,
+         jadi uninstall tetap bersih total. -->
 
     <application
         android:label="Debz AI"

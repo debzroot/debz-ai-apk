@@ -12,6 +12,7 @@ public final class DebzConfig {
     private static final String KEY_TOKEN = "gh_token";
     private static final String KEY_STATUS = "stack_status";
     private static final String KEY_ROOTFS_URL = "rootfs_url";
+    private static final String KEY_PERM_ASKED = "file_perm_asked";
 
     private DebzConfig() {}
 
@@ -69,5 +70,13 @@ public final class DebzConfig {
 
     public static void setStatus(Context ctx, String status) {
         prefs(ctx).edit().putString(KEY_STATUS, status).apply();
+    }
+
+    public static boolean permAsked(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_PERM_ASKED, false);
+    }
+
+    public static void setPermAsked(Context ctx) {
+        prefs(ctx).edit().putBoolean(KEY_PERM_ASKED, true).apply();
     }
 }
