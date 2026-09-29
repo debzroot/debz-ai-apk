@@ -7,6 +7,8 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import java.io.File;
+import java.io.FileWriter;
 
 public class BootstrapService extends Service {
     public static final String EXTRA_OFFSET = "ai.debz.EXTRA_OFFSET";
@@ -47,9 +49,10 @@ public class BootstrapService extends Service {
             }
             if (RootfsManager.ready(ctx)) {
                 DebzConfig.setStatus(ctx, "starting-stack");
-                StackSupervisor.start(ctx, RootfsManager.dir(ctx),
+                String out = StackSupervisor.start(ctx, RootfsManager.dir(ctx),
                     StackSupervisor.envFor(web, api, fpm));
                 boolean ok = StackSupervisor.healthy("http://127.0.0.1:" + web + "/");
+                if (!ok) saveStackLog(ctx, out);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");
             } else {
                 DebzConfig.setStatus(ctx, "no-rootfs");
@@ -59,8 +62,16 @@ public class BootstrapService extends Service {
         }
     }
 
-    private Notification buildNotif() {
-        NotificationManager nm = getSystemService(NotificationManager.class);
+    // output start stack terakhir, dibaca dari device saat stack-fail
+    private static void saveStackLog(android.content.Context ctx, String out) {
+        try {
+            FileWriter w = new FileWriter(new File(ctx.getFilesDir(), "stack-last.log"), false);
+            w.write(out != null && !out.isEmpty() ? out : "(kosong)");
+            w.close();
+        } catch (Exception ignored) {}
+    }
+
+    private Notification buildNotif() {        NotificationManager nm = getSystemService(NotificationManager.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm != null) {
             NotificationChannel ch = new NotificationChannel(
                 CHANNEL, "Debz AI backend", NotificationManager.IMPORTANCE_LOW);
