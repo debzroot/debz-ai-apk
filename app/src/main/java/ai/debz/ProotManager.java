@@ -78,6 +78,12 @@ public final class ProotManager {
         String oldLp = pb.environment().get("LD_LIBRARY_PATH");
         pb.environment().put("LD_LIBRARY_PATH", libDir.getAbsolutePath()
             + (oldLp != null && !oldLp.isEmpty() ? ":" + oldLp : ""));
+        // binary proot dikompilasi untuk Termux: TMPDIR default-nya
+        // /data/data/com.termux/... yang tak ada di HP ini -> arahkan ke
+        // app-private biar glue rootfs bisa kebentuk
+        File tmpDir = new File(ctx.getFilesDir(), "proot-tmp");
+        tmpDir.mkdirs();
+        pb.environment().put("PROOT_TMP_DIR", tmpDir.getAbsolutePath());
         pb.redirectErrorStream(true);
         return pb.start();
     }
