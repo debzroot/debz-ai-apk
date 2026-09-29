@@ -26,12 +26,17 @@ for f in /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
   grep -q '^Architectures:' "$f" || sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' "$f"
 done
-if [ -f /etc/apt/sources.list ]; then
-  sudo sed -i 's/^deb /deb [arch=amd64] /; s/deb \[arch=amd64\] \[arch=amd64\]/deb [arch=amd64]/' /etc/apt/sources.list
-fi
-for f in /etc/apt/sources.list.d/*.list; do
+sudo mkdir -p /tmp/apt-bak
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+  [ -e "$f" ] || continue
+  sudo mv "$f" /tmp/apt-bak/
+done
+for f in /etc/apt/sources.list.d/*.sources; do
   [ -f "$f" ] || continue
-  sudo sed -i 's/^deb /deb [arch=amd64] /; s/deb \[arch=amd64\] \[arch=amd64\]/deb [arch=amd64]/' "$f"
+  case "$f" in
+    *ubuntu.sources|*arm64-ports.sources) ;;
+    *) sudo mv "$f" /tmp/apt-bak/ ;;
+  esac
 done
 if ! grep -q ports.ubuntu.com /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null; then
   sudo tee /etc/apt/sources.list.d/arm64-ports.sources > /dev/null <<'EOF'
