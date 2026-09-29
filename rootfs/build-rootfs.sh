@@ -20,51 +20,15 @@ echo ">> [1/7] ubuntu-base arm64"
 curl -sSL -o "$WORK/base.tar.gz" "$UBUNTU_BASE_URL"
 tar -xzf "$WORK/base.tar.gz" -C "$ROOTFS"
 
-echo ">> [2/7] unduh paket arm64 (deps auto-resolve)"
-sudo dpkg --add-architecture arm64 2>/dev/null || true
-for f in /etc/apt/sources.list.d/*.sources; do
-  [ -f "$f" ] || continue
-  grep -q '^Architectures:' "$f" || sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' "$f"
-done
-sudo mkdir -p /tmp/apt-bak
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
-  [ -e "$f" ] || continue
-  sudo mv "$f" /tmp/apt-bak/
-done
-for f in /etc/apt/sources.list.d/*.sources; do
-  [ -f "$f" ] || continue
-  case "$f" in
-    *ubuntu.sources|*arm64-ports.sources) ;;
-    *) sudo mv "$f" /tmp/apt-bak/ ;;
-  esac
-done
-if ! grep -q ports.ubuntu.com /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null; then
-  sudo tee /etc/apt/sources.list.d/arm64-ports.sources > /dev/null <<'EOF'
-Types: deb
-URIs: http://ports.ubuntu.com/ubuntu-ports
-Suites: noble noble-updates
-Components: main universe
-Architectures: arm64
-Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-EOF
-fi
-sudo apt-get update -qq
-echo ">> [2a/7] paket inti arm64"
-sudo apt-get install --download-only -y --no-install-recommends \
-  -o Dir::Cache::archives="$DEBS" \
-  bash:arm64 dash:arm64 procps:arm64 \
-  php8.3-fpm:arm64 php8.3-cli:arm64 \
-  nginx:arm64 ca-certificates:arm64 \
-  python3:arm64
-echo ">> [2b/7] python venv/pip (best-effort, fallback get-pip.py)"
-sudo apt-get install --download-only -y --no-install-recommends \
-  -o Dir::Cache::archives="$DEBS" \
-  python3-venv:arm64 2>/dev/null || echo "   ! python3-venv:arm64 skip, pakai ensurepip/get-pip"
-sudo apt-get install --download-only -y --no-install-recommends \
-  -o Dir::Cache::archives="$DEBS" \
-  python3-pip:arm64 2>/dev/null || echo "   ! python3-pip:arm64 skip, pakai get-pip.py"
+echo ">> [2/7] unduh paket arm64 langsung dari ports (tanpa apt host)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$SCRIPT_DIR/fetch-arm64-debs.py" "$DEBS" \
+  bash dash procps \
+  php8.3-fpm php8.3-cli \
+  nginx ca-certificates \
+  python3 python3-venv
+echo ">> [2b/7] get-pip.py bootstrap"
 curl -sSL -o "$ROOTFS/opt/debz-get-pip-tmp" https://bootstrap.pypa.io/get-pip.py 2>/dev/null && mkdir -p "$ROOTFS/opt/debz" && mv "$ROOTFS/opt/debz-get-pip-tmp" "$ROOTFS/opt/debz/get-pip.py" || echo "   ! get-pip.py gagal diunduh, first-boot pakai ensurepip"
-sudo chown -R "$(id -u):$(id -g)" "$DEBS"
 
 echo ">> [3/7] unpack .deb ke rootfs"
 for f in "$DEBS"/*.deb; do dpkg-deb -x "$f" "$ROOTFS"; done
