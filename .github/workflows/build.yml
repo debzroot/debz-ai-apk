@@ -92,17 +92,31 @@ jobs:
       - name: Cek assets
         run: ls -la app/src/main/assets/
 
+      - name: Siapkan signing key (dari secret, jangan pernah commit)
+        env:
+          DEBZ_KEYSTORE: ${{ secrets.DEBZ_KEYSTORE_B64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          if [ -z "$DEBZ_KEYSTORE" ]; then
+            echo "::warning::Secret DEBZ_KEYSTORE_B64 kosong — APK akan fallback ke debug key (upgrade next build jadi uninstall)"
+          else
+            printf '%s' "$DEBZ_KEYSTORE" | base64 -d > "$RUNNER_TEMP/keys/debz.jks"
+            echo "KEYSTORE=$RUNNER_TEMP/keys/debz.jks" >> "$GITHUB_ENV"
+          fi
+
       - uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.7
 
-      - name: Build debug APK
+      - name: Build release APK
         env:
           GRADLE_OPTS: -Xmx4g -Dfile.encoding=UTF-8
-        run: gradle :app:assembleDebug --no-daemon --max-workers=1
+          DEBZ_KEYSTORE_PASSWORD: ${{ secrets.DEBZ_KEYSTORE_PASSWORD }}
+          DEBZ_KEY_ALIAS: ${{ secrets.DEBZ_KEY_ALIAS }}
+        run: gradle :app:assembleRelease --no-daemon --max-workers=1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: debz-ai-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: debz-ai-apk
+          path: app/build/outputs/apk/release/app-release.apk

@@ -178,6 +178,7 @@ public final class RootfsManager {
         // skrip stack harus executable
         new File(dest, "opt/debz/start-stack.sh").setExecutable(true);
         new File(dest, "opt/debz/stop-stack.sh").setExecutable(true);
+        new File(dest, "opt/debz/watchdog.sh").setExecutable(true);
     }
 
     // hapus RF lama (dipakai OTA/ganti versi)

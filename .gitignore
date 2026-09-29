@@ -9,3 +9,11 @@ captures/
 .externalNativeBuild/
 .cxx/
 rootfs/__pycache__/
+out/
+.work-rootfs/
+# build-time artifacts dari CI: rootfs 130MB + proot .so, jangan pernah ke-commit
+app/src/main/assets/
+app/src/main/jniLibs/
+*.jks
+*.keystore
+keystore.properties

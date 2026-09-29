@@ -2,6 +2,13 @@ plugins {
     id("com.android.application")
 }
 
+// Signing key comes from env (CI secret), never from the repo: runner-generated
+// debug keys change every build, so an upgrade would die with
+// INSTALL_FAILED_UPDATE_INCOMPATIBLE and force a wipe of the 130MB rootfs.
+def keystoreFile = System.getenv("DEBZ_KEYSTORE")
+def keystorePass = System.getenv("DEBZ_KEYSTORE_PASSWORD")
+def keystoreAlias = System.getenv("DEBZ_KEY_ALIAS")
+
 android {
     namespace = "ai.debz"
     compileSdk = 34
@@ -19,12 +26,26 @@ android {
         noCompress "tar.gz"
     }
 
+    signingConfigs {
+        if (keystoreFile && keystorePass && keystoreAlias && file(keystoreFile).exists()) {
+            create("release") {
+                storeFile = file(keystoreFile)
+                storePassword = keystorePass
+                keyAlias = keystoreAlias
+                keyPassword = keystorePass
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled = false
+            signingConfig = keystoreFile ? signingConfigs.getByName("release") : signingConfigs.getByName("debug")
         }
+        // tanpa applicationIdSuffix: debug & release sama-sama ai.debz,
+        // jadi ga ada app kembar yang diam-diam nyisa data pas uninstall
         debug {
-            applicationIdSuffix = ".debug"
+            minifyEnabled = false
         }
     }
 

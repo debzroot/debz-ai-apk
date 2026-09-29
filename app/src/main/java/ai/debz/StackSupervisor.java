@@ -19,6 +19,8 @@ public final class StackSupervisor {
         env.put("PORT_API", String.valueOf(api));
         env.put("PORT_FPM", String.valueOf(fpm));
         env.put("START_OPENCODE", "1");
+        // watchdog.sh bunuh stack saat pid ini hilang -> uninstall bersih total
+        env.put("DEBZ_APP_PID", String.valueOf(android.os.Process.myPid()));
         return env;
     }
 

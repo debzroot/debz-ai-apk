@@ -17,7 +17,12 @@ if [ ! -f "$APP/index.php" ]; then
   echo "<h3>debz-ai stack OK</h3><p>web=$PORT_WEB api=$PORT_API</p>" > "$APP/index.html"
 fi
 
-/usr/sbin/php-fpm8.3 -D -y /tmp/debz-phpfpm.conf
+# bunuh stack otomatis kalau app Android mati (uninstall/force-stop/crash)
+"$R/watchdog.sh" &
+echo "watchdog pid $!"
+
+# -D = jangan daemonize, tapi tetap & biar script lanjut ke nginx/opencode
+/usr/sbin/php-fpm8.3 -D -y /tmp/debz-phpfpm.conf >> "$R/logs/php-fpm-boot.log" 2>&1 &
 /usr/sbin/nginx -c /tmp/debz-nginx.conf
 if [ "${START_OPENCODE:-1}" = "1" ]; then
   mkdir -p "$APP/opencode-bin"
