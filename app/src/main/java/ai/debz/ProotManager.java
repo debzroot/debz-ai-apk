@@ -70,10 +70,11 @@ public final class ProotManager {
         ProcessBuilder pb = new ProcessBuilder(a);
         pb.directory(rootfs);
         if (env != null) pb.environment().putAll(env);
-        // dependensi proot (libtalloc.so.N) tinggal di files/bin, bukan di
-        // path standar linker — kasih tahu lewat LD_LIBRARY_PATH
+        // dependensi proot (libtalloc, libandroid-shmem, libtermux-exec)
+        // tinggal di files/bin, bukan di path standar linker — kasih tahu
+        // lewat LD_LIBRARY_PATH
         File libDir = new File(ctx.getFilesDir(), "bin");
-        ensureTalloc(ctx, libDir);
+        ensureNativeLibs(ctx, libDir);
         String oldLp = pb.environment().get("LD_LIBRARY_PATH");
         pb.environment().put("LD_LIBRARY_PATH", libDir.getAbsolutePath()
             + (oldLp != null && !oldLp.isEmpty() ? ":" + oldLp : ""));
@@ -81,27 +82,22 @@ public final class ProotManager {
         return pb.start();
     }
 
-    private static void ensureTalloc(Context ctx, File libDir) throws Exception {
-        String name = null;
+    // semua lib*.so* di assets (dependensi proot) diekstrak sekali ke bin
+    private static void ensureNativeLibs(Context ctx, File libDir) throws Exception {
         String[] assets = ctx.getAssets().list("");
-        if (assets != null) {
-            for (String n : assets) {
-                if (n != null && n.startsWith("libtalloc.so")) {
-                    name = n;
-                    break;
-                }
+        if (assets == null) return;
+        for (String name : assets) {
+            if (name == null || !name.startsWith("lib")) continue;
+            if (!name.endsWith(".so") && !name.contains(".so.")) continue;
+            File out = new File(libDir, name);
+            if (out.exists()) continue;
+            libDir.mkdirs();
+            try (InputStream in = ctx.getAssets().open(name);
+                 OutputStream o = new FileOutputStream(out)) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
             }
         }
-        if (name == null) return;
-        File out = new File(libDir, name);
-        if (out.exists()) return;
-        libDir.mkdirs();
-        try (InputStream in = ctx.getAssets().open(name);
-             OutputStream o = new FileOutputStream(out)) {
-            byte[] buf = new byte[65536];
-            int n;
-            while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
-        }
-        out.setExecutable(false);
     }
 }

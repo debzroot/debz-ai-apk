@@ -80,18 +80,32 @@ jobs:
           curl -sSL -o /tmp/proot.deb https://packages.termux.org/apt/termux-main/pool/main/p/proot/proot_5.1.107.95_aarch64.deb
           dpkg-deb -x /tmp/proot.deb /tmp/proot-ex
           cp /tmp/proot-ex/data/data/com.termux/files/usr/bin/proot app/src/main/jniLibs/arm64-v8a/libproot.so
-          # proot link dinamis ke libtalloc.so.N: jniLibs AGP cuma kemas *.so
-          # (nama berversi seperti .so.2 dibuang!), jadi taruh di assets lalu
-          # app ekstrak sendiri ke files/bin + LD_LIBRARY_PATH saat exec
-          TALLOC_URL=$(curl -sSL https://packages.termux.org/apt/termux-main/dists/stable/main/binary-aarch64/Packages \
-            | awk '/^Package: libtalloc$/{f=1} f && /^Filename: /{print "https://packages.termux.org/apt/termux-main/"$2; exit}')
-          [ -n "$TALLOC_URL" ] || { echo "::error::libtalloc filename tidak ketemu di Packages index"; exit 1; }
-          echo "libtalloc: $TALLOC_URL"
-          curl -sSL -o /tmp/talloc.deb "$TALLOC_URL"
-          dpkg-deb -x /tmp/talloc.deb /tmp/talloc-ex
+          # proot Termux link dinamis ke libtalloc + libandroid-shmem +
+          # libtermux-exec. jniLibs AGP cuma kemas *.so (nama berversi seperti
+          # .so.2 dibuang!), jadi semua taruh di assets lalu app ekstrak
+          # sendiri ke files/bin + LD_LIBRARY_PATH saat exec.
           mkdir -p app/src/main/assets
-          cp /tmp/talloc-ex/data/data/com.termux/files/usr/lib/libtalloc.so.[0-9]* app/src/main/assets/
-          ls app/src/main/assets/libtalloc.so.* || { echo "::error::libtalloc.so tidak kebawa"; exit 1; }
+          pkg_url() {
+            curl -sSL https://packages.termux.org/apt/termux-main/dists/stable/main/binary-aarch64/Packages \
+              | awk -v p="$1" '/^Package: /{f=($2==p)} f && /^Filename: /{print "https://packages.termux.org/apt/termux-main/"$2; exit}'
+          }
+          fetch_lib() {
+            local names="$1" glob="$2" n url
+            for n in ${names//,/ }; do
+              url=$(pkg_url "$n")
+              [ -n "$url" ] && break
+            done
+            [ -n "$url" ] || { echo "::error::$1 tidak ketemu di Packages index"; exit 1; }
+            echo "lib $n -> $url"
+            rm -rf /tmp/lib-ex && mkdir -p /tmp/lib-ex
+            curl -sSL -o /tmp/lib.deb "$url"
+            dpkg-deb -x /tmp/lib.deb /tmp/lib-ex
+            cp /tmp/lib-ex/data/data/com.termux/files/usr/lib/$glob app/src/main/assets/
+          }
+          fetch_lib "libtalloc" "libtalloc.so.*"
+          fetch_lib "libandroid-shmem" "libandroid-shmem.so*"
+          fetch_lib "libtermux-exec,termux-exec" "libtermux-exec.so*"
+          ls app/src/main/assets/ | grep -E '\.so' || { echo "::error::tidak ada .so kebawa"; exit 1; }
           readelf -d app/src/main/jniLibs/arm64-v8a/libproot.so | grep NEEDED || true
           chmod +x app/src/main/jniLibs/arm64-v8a/libproot.so
           ls -la app/src/main/jniLibs/arm64-v8a/
