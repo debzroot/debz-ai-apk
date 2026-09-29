@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
                 view.loadData("<h3>Backend belum siap.</h3>"
+                    + "<p>Status: " + DebzConfig.status(MainActivity.this) + "</p>"
                     + "<p>Tunggu BootstrapService selesai, lalu tap Reload.</p>",
                     "text/html", "utf-8");
             }

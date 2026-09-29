@@ -25,6 +25,15 @@ jobs:
           yes | sdkmanager --licenses > /dev/null
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
+      - name: Fetch proot arm64 (jniLibs)
+        run: |
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          curl -sSL -o /tmp/proot.deb https://packages.termux.org/apt/termux-main/pool/main/p/proot/proot_5.1.107.95_aarch64.deb
+          dpkg-deb -x /tmp/proot.deb /tmp/proot-ex
+          cp /tmp/proot-ex/data/data/com.termux/files/usr/bin/proot app/src/main/jniLibs/arm64-v8a/libproot.so
+          chmod +x app/src/main/jniLibs/arm64-v8a/libproot.so
+          ls -la app/src/main/jniLibs/arm64-v8a/
+
       - uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.7

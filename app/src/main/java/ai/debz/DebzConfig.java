@@ -9,6 +9,9 @@ public final class DebzConfig {
     private static final String KEY_WEB = "port_web";
     private static final String KEY_API = "port_api";
     private static final String KEY_ROOT = "mode_root";
+    private static final String KEY_TOKEN = "gh_token";
+    private static final String KEY_STATUS = "stack_status";
+    private static final String KEY_ROOTFS_URL = "rootfs_url";
 
     private DebzConfig() {}
 
@@ -42,5 +45,29 @@ public final class DebzConfig {
 
     public static void setRootMode(Context ctx, boolean root) {
         prefs(ctx).edit().putBoolean(KEY_ROOT, root).apply();
+    }
+
+    public static String token(Context ctx) {
+        return prefs(ctx).getString(KEY_TOKEN, "");
+    }
+
+    public static void setToken(Context ctx, String token) {
+        prefs(ctx).edit().putString(KEY_TOKEN, token).apply();
+    }
+
+    public static String rootfsUrl(Context ctx) {
+        return prefs(ctx).getString(KEY_ROOTFS_URL, "");
+    }
+
+    public static void setRootfsUrl(Context ctx, String url) {
+        prefs(ctx).edit().putString(KEY_ROOTFS_URL, url).apply();
+    }
+
+    public static String status(Context ctx) {
+        return prefs(ctx).getString(KEY_STATUS, "idle");
+    }
+
+    public static void setStatus(Context ctx, String status) {
+        prefs(ctx).edit().putString(KEY_STATUS, status).apply();
     }
 }

@@ -51,11 +51,19 @@ public class TerminalActivity extends Activity {
 
     private void exec(String line) {
         if (line.trim().isEmpty()) return;
-        append("$ " + line + "\n");
+        final boolean inProot = RootfsManager.ready(this);
+        append((inProot ? "[proot] " : "") + "$ " + line + "\n");
         new Thread(() -> {
             try {
-                Process p = new ProcessBuilder("/system/bin/sh", "-c", line)
-                    .redirectErrorStream(true).start();
+                Process p;
+                if (inProot) {
+                    // TODO: ganti ke sesi interaktif + debz-term default
+                    p = ProotManager.exec(this, RootfsManager.dir(this),
+                        null, line);
+                } else {
+                    p = new ProcessBuilder("/system/bin/sh", "-c", line)
+                        .redirectErrorStream(true).start();
+                }
                 String res = readAll(p.getInputStream());
                 p.waitFor();
                 append(res + "\n[exit " + p.exitValue() + "]\n");

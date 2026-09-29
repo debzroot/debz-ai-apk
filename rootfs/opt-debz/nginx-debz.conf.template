@@ -1,0 +1,20 @@
+pid /tmp/debz-nginx.pid;
+error_log /opt/debz/logs/nginx-error.log;
+events { worker_connections 64; }
+http {
+    include /etc/nginx/mime.types;
+    access_log /opt/debz/logs/nginx-access.log;
+    server {
+        listen @WEB@;
+        root /opt/debz/www;
+        index index.html index.php;
+        location / {
+            try_files $uri $uri/ =404;
+        }
+        location ~ \.php$ {
+            fastcgi_pass 127.0.0.1:@FPM@;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            include /etc/nginx/fastcgi_params;
+        }
+    }
+}

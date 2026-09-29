@@ -1,0 +1,45 @@
+name: rootfs
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Buat GitHub Release dari hasil build (mis. rootfs-mini-v1). Kosongkan = artefak saja."
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths: ["rootfs/**", ".github/workflows/rootfs.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build rootfs-mini
+        run: bash rootfs/build-rootfs.sh
+        env:
+          WORK: ${{ github.workspace }}/.work-rootfs
+          OUT: ${{ github.workspace }}/out
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-mini
+          path: |
+            out/rootfs-mini.tar.gz
+            out/SHA256SUMS
+
+      - name: GitHub Release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ inputs.release_tag }}" \
+            --title "${{ inputs.release_tag }}" \
+            --notes "rootfs-mini arm64: ubuntu-base 24.04 + php-fpm/nginx/python3 + opencode ${OPENCODE_VER:-} + wheels offline" \
+            out/rootfs-mini.tar.gz out/SHA256SUMS

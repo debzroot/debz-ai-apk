@@ -23,13 +23,34 @@ public class BootstrapService extends Service {
     }
 
     private void boot(int offset, android.content.Context ctx) {
-        boolean rooted = RootDetector.suWorks();
-        DebzConfig.setRootMode(ctx, rooted);
-        int web = PortManager.takePreferred(8091 + offset);
-        int api = PortManager.takePreferred(8092 + offset);
-        DebzConfig.setPorts(ctx, web, api);
-        // TODO: start proot-mini stack (php-fpm + nginx + opencode + python backend)
-        // lalu health-check + update notifikasi status.
+        DebzConfig.setStatus(ctx, "booting");
+        try {
+            boolean rooted = RootDetector.suWorks();
+            DebzConfig.setRootMode(ctx, rooted);
+            int web = PortManager.takePreferred(8091 + offset);
+            int api = PortManager.takePreferred(8092 + offset);
+            int fpm = PortManager.takePreferred(9000 + offset);
+            DebzConfig.setPorts(ctx, web, api);
+
+            String url = DebzConfig.rootfsUrl(ctx);
+            String sha = ""; // TODO: isi dari OTA manifest
+            if (!url.isEmpty() && !RootfsManager.ready(ctx)) {
+                DebzConfig.setStatus(ctx, "download-rootfs");
+                RootfsManager.ensure(ctx, url, sha, DebzConfig.token(ctx),
+                    (stage, pct) -> DebzConfig.setStatus(ctx, stage + ":" + pct));
+            }
+            if (RootfsManager.ready(ctx)) {
+                DebzConfig.setStatus(ctx, "starting-stack");
+                StackSupervisor.start(ctx, RootfsManager.dir(ctx),
+                    StackSupervisor.envFor(web, api, fpm));
+                boolean ok = StackSupervisor.healthy("http://127.0.0.1:" + web + "/");
+                DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");
+            } else {
+                DebzConfig.setStatus(ctx, "no-rootfs");
+            }
+        } catch (Exception e) {
+            DebzConfig.setStatus(ctx, "error:" + e.getMessage());
+        }
     }
 
     private Notification buildNotif() {
