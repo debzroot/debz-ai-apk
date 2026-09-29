@@ -80,16 +80,18 @@ jobs:
           curl -sSL -o /tmp/proot.deb https://packages.termux.org/apt/termux-main/pool/main/p/proot/proot_5.1.107.95_aarch64.deb
           dpkg-deb -x /tmp/proot.deb /tmp/proot-ex
           cp /tmp/proot-ex/data/data/com.termux/files/usr/bin/proot app/src/main/jniLibs/arm64-v8a/libproot.so
-          # proot link dinamis ke libtalloc: ikut bundel SONAME-nya, linker
-          # bionic otomatis cari dependensi di lib dir app sendiri
+          # proot link dinamis ke libtalloc.so.N: jniLibs AGP cuma kemas *.so
+          # (nama berversi seperti .so.2 dibuang!), jadi taruh di assets lalu
+          # app ekstrak sendiri ke files/bin + LD_LIBRARY_PATH saat exec
           TALLOC_URL=$(curl -sSL https://packages.termux.org/apt/termux-main/dists/stable/main/binary-aarch64/Packages \
             | awk '/^Package: libtalloc$/{f=1} f && /^Filename: /{print "https://packages.termux.org/apt/termux-main/"$2; exit}')
           [ -n "$TALLOC_URL" ] || { echo "::error::libtalloc filename tidak ketemu di Packages index"; exit 1; }
           echo "libtalloc: $TALLOC_URL"
           curl -sSL -o /tmp/talloc.deb "$TALLOC_URL"
           dpkg-deb -x /tmp/talloc.deb /tmp/talloc-ex
-          cp /tmp/talloc-ex/data/data/com.termux/files/usr/lib/libtalloc.so.* app/src/main/jniLibs/arm64-v8a/
-          ls app/src/main/jniLibs/arm64-v8a/libtalloc.so.* || { echo "::error::libtalloc.so tidak kebawa"; exit 1; }
+          mkdir -p app/src/main/assets
+          cp /tmp/talloc-ex/data/data/com.termux/files/usr/lib/libtalloc.so.[0-9]* app/src/main/assets/
+          ls app/src/main/assets/libtalloc.so.* || { echo "::error::libtalloc.so tidak kebawa"; exit 1; }
           readelf -d app/src/main/jniLibs/arm64-v8a/libproot.so | grep NEEDED || true
           chmod +x app/src/main/jniLibs/arm64-v8a/libproot.so
           ls -la app/src/main/jniLibs/arm64-v8a/

@@ -70,7 +70,38 @@ public final class ProotManager {
         ProcessBuilder pb = new ProcessBuilder(a);
         pb.directory(rootfs);
         if (env != null) pb.environment().putAll(env);
+        // dependensi proot (libtalloc.so.N) tinggal di files/bin, bukan di
+        // path standar linker — kasih tahu lewat LD_LIBRARY_PATH
+        File libDir = new File(ctx.getFilesDir(), "bin");
+        ensureTalloc(ctx, libDir);
+        String oldLp = pb.environment().get("LD_LIBRARY_PATH");
+        pb.environment().put("LD_LIBRARY_PATH", libDir.getAbsolutePath()
+            + (oldLp != null && !oldLp.isEmpty() ? ":" + oldLp : ""));
         pb.redirectErrorStream(true);
         return pb.start();
+    }
+
+    private static void ensureTalloc(Context ctx, File libDir) throws Exception {
+        String name = null;
+        String[] assets = ctx.getAssets().list("");
+        if (assets != null) {
+            for (String n : assets) {
+                if (n != null && n.startsWith("libtalloc.so")) {
+                    name = n;
+                    break;
+                }
+            }
+        }
+        if (name == null) return;
+        File out = new File(libDir, name);
+        if (out.exists()) return;
+        libDir.mkdirs();
+        try (InputStream in = ctx.getAssets().open(name);
+             OutputStream o = new FileOutputStream(out)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+        }
+        out.setExecutable(false);
     }
 }
