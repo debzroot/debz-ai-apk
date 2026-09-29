@@ -2,6 +2,7 @@ package ai.debz;
 
 import android.content.Context;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -35,37 +36,55 @@ public final class RootfsManager {
     }
 
     public static boolean hasBundled(Context ctx) {
+        return bundledName(ctx) != null;
+    }
+
+    // nama file aktual di assets: rantai CI kadang menyimpan .tar polos
+    // (bukan .tar.gz) — deteksi prefix biar dua-duanya jalan.
+    public static String bundledName(Context ctx) {
         try {
             for (String n : ctx.getAssets().list("")) {
-                if ("rootfs-mini.tar.gz".equals(n)) return true;
+                if (n != null && n.startsWith("rootfs-mini.tar")) return n;
             }
         } catch (Exception ignored) {}
-        return false;
+        return null;
     }
 
     public static void ensureFromAssets(Context ctx, Progress cb) throws Exception {
         if (ready(ctx)) return;
+        String asset = bundledName(ctx);
+        if (asset == null) throw new Exception("rootfs tidak dibundle di APK");
+        boolean gzipped = asset.endsWith(".gz");
         File d = dir(ctx);
         d.mkdirs();
-        File tgz = new File(d, "rootfs-mini.tar.gz");
-        try (InputStream in = ctx.getAssets().open("rootfs-mini.tar.gz");
-             OutputStream out = new FileOutputStream(tgz)) {
+        File pkg = new File(d, "rootfs-mini.pkg");
+        try (InputStream in = ctx.getAssets().open(asset);
+             OutputStream out = new FileOutputStream(pkg)) {
             byte[] buf = new byte[65536];
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
         }
         if (cb != null) cb.on("copy", 50);
-        String sha = "";
-        try (InputStream in = ctx.getAssets().open("SHA256SUMS")) {
-            byte[] b = new byte[256];
-            int n = in.read(b);
-            if (n > 0) sha = new String(b, 0, n, "UTF-8").trim().split("\\s+")[0];
-        } catch (Exception ignored) {}
-        verify(tgz, sha, cb);
-        extract(tgz, d, cb);
+        String[] sum = readSums(ctx);
+        if (sum != null && asset.equals(sum[1])) verify(pkg, sum[0], cb);
+        extract(pkg, gzipped, d, cb);
         if (!marker(ctx).createNewFile()) throw new Exception("marker gagal");
-        tgz.delete();
+        pkg.delete();
         if (cb != null) cb.on("done", 100);
+    }
+
+    // "hash  filename" ala sha256sum; null kalau tak terbaca
+    private static String[] readSums(Context ctx) {
+        try (InputStream in = ctx.getAssets().open("SHA256SUMS")) {
+            ByteArrayOutputStream b = new ByteArrayOutputStream();
+            byte[] buf = new byte[512];
+            int n;
+            while ((n = in.read(buf)) > 0) b.write(buf, 0, n);
+            String[] p = b.toString("UTF-8").trim().split("\\s+");
+            if (p.length >= 2) return new String[]{p[0], p[1]};
+            if (p.length == 1) return new String[]{p[0], ""};
+        } catch (Exception ignored) {}
+        return null;
     }
 
     public static void ensure(Context ctx, String url, String sha256,
@@ -77,7 +96,7 @@ public final class RootfsManager {
         File tgz = new File(d, "rootfs-mini.tar.gz");
         download(url, token, part, tgz, cb);
         verify(tgz, sha256, cb);
-        extract(tgz, d, cb);
+        extract(tgz, true, d, cb);
         if (!marker(ctx).createNewFile()) throw new Exception("marker gagal");
         tgz.delete();
         if (cb != null) cb.on("done", 100);
@@ -140,14 +159,14 @@ public final class RootfsManager {
         }
     }
 
-    private static void extract(File tgz, File dest, Progress cb) throws Exception {
+    private static void extract(File pkg, boolean gzipped, File dest, Progress cb) throws Exception {
         if (cb != null) cb.on("extract", 60);
-        long total = tgz.length();
+        long total = pkg.length();
         long read = 0;
         int lastPct = 60;
-        try (InputStream fi = new BufferedInputStream(new FileInputStream(tgz));
-             GzipCompressorInputStream gz = new GzipCompressorInputStream(fi);
-             TarArchiveInputStream tar = new TarArchiveInputStream(gz)) {
+        InputStream fi = new BufferedInputStream(new FileInputStream(pkg));
+        InputStream uncompressed = gzipped ? new GzipCompressorInputStream(fi) : fi;
+        try (TarArchiveInputStream tar = new TarArchiveInputStream(uncompressed)) {
             TarArchiveEntry e;
             while ((e = tar.getNextEntry()) != null) {
                 File f = new File(dest, e.getName());
