@@ -194,6 +194,14 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
                 http_response_code(400);
                 echo json_encode(['error' => 'base_url invalid']);
                 exit;
+            }
+            // PROXY-FREE + ZEN DIRECT: opencode-cli/zen tidak pakai /models probe.
+            // Probe /models dengan Bearer kosong di proot = hang/401 bisu -> frontend "network error".
+            if(stripos($tUrl,'opencode.ai/zen')!== false) {
+                $tp = ($tId !== '' && ! empty($PROVIDERS['providers'][$tId]))? $PROVIDERS['providers'][$tId]: null;
+                $tm = ($tp && ! empty($tp['models'])&& is_array($tp['models']))? array_slice(array_values($tp['models']),0,500): [($tp['model']?? 'muse-spark-1.3-contributor-free')];
+                echo json_encode(['success' => true,'http' => 200,'models' => $tm,'direct' => 'zen-cli']);
+                exit;
             }$tUa = trim((string)($in['ua']?? ''));
             if($tUa === '' && stripos($tUrl,'openrouter.ai')!== false)$tUa = 'opencode/1.0 (linux; x64)';
             $tHeaders = ['Authorization: Bearer '.$tKey];
@@ -252,6 +260,16 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             if(! preg_match('#^https?:\/\/#i',$gUrl)) {
                 http_response_code(400);
                 echo json_encode(['error' => 'base_url invalid']);
+                exit;
+            }
+            // PROXY-FREE + ZEN DIRECT: jangan probe /models & /chat/completions.
+            // Probe model=test = bakar kuota + hang di proot -> frontend "network error".
+            if(stripos($gUrl,'opencode.ai/zen')!== false) {
+                $b = random_bytes(16);
+                $b[6]= chr((ord($b[6])& 0x0f)| 0x40);
+                $b[8]= chr((ord($b[8])& 0x3f)| 0x80);
+                $zs = vsprintf('%s%s-%s-%s-%s-%s%s%s',str_split(bin2hex($b),4));
+                echo json_encode(['success' => true,'session_id' => $zs,'source' => 'generated','error' => '-']);
                 exit;
             }$gUa = trim((string)($in['ua']?? ''));
             if($gUa === '' && stripos($gUrl,'openrouter.ai')!== false)$gUa = 'opencode/1.0 (linux; x64)';
@@ -313,6 +331,14 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             if($spModel === '') {
                 http_response_code(400);
                 echo json_encode(['error' => 'model kosong — isi dulu kolom model']);
+                exit;
+            }
+            // PROXY-FREE + ZEN DIRECT: tanpa probe network. Heuristik nama doang.
+            if(stripos($spUrl,'opencode.ai/zen')!== false) {
+                $hl = strtolower($spModel);
+                $zr = (strpos($hl,'think')!== false || strpos($hl,'reason')!== false || strpos($hl,'r1')!== false || strpos($hl,'glm')!== false || strpos($hl,'qwq')!== false || strpos($hl,'o1')!== false || strpos($hl,'o3')!== false);
+                $ze = $zr? ['temperature' => 0.6]: ['temperature' => 0.7];
+                echo json_encode(['success' => true,'is_reasoning' => $zr,'is_openrouter' => false,'max_tokens' => 8192,'extra' => $ze,'extra_json' => json_encode($ze,JSON_UNESCAPED_SLASHES),'supported_params' => null,'notes' => ['zen direct: tanpa probe network (anti network error)']]);
                 exit;
             }$spUa = trim((string)($in['ua']?? ''));
             if($spUa === '' && stripos($spUrl,'openrouter.ai')!== false)$spUa = 'opencode/1.0 (linux; x64)';

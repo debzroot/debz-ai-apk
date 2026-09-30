@@ -709,76 +709,9 @@ function termEmit(string $kind,string $text): void {
     }
 }
 function debz_cli_proxy_pick(): array {
-    $st = debz_proxy_load_state();
-    if(! is_array($st))return['',[]];
-    $mode = (string)($st['mode']?? 'proxy');
-    if($mode === 'direct')return['',[]];
-    if($mode === 'auto') {
-        $until = (int)($GLOBALS['_debz_direct_429_until']?? 0);
-        if(time()>= $until && empty($GLOBALS['_debz_proxy_force_new']))return['',[]];
-    }$type = (string)($st['type']?? 'http');
-    if($type === '')$type = 'http';
-    if($type === 'auto')$type = debz_proxy_auto_type();
-    $forceNew = ! empty($GLOBALS['_debz_proxy_force_new']);
-    $GLOBALS['_debz_proxy_force_new']= false;
-    $proxy = '';
-    $usedType = $type;
-    if(! empty($st['sticky'])&& debz_proxy_sticky_enabled()&& ! $forceNew) {
-        $sp = (string)($st['sticky_proxy']?? '');
-        if($sp !== '' && ! debz_proxy_is_blacklisted($sp)) {
-            $lastLive = (int)($st['last_live']?? 0);
-            if($lastLive > 0 && (time()- $lastLive)< 600) {
-                $proxy = $sp;
-                $usedType = (string)($st['sticky_type']?? $type);
-            }else {
-                $probeStatus = debz_proxy_probe_cached($sp,3000);
-                if($probeStatus === 'ok' || $probeStatus === 'timeout') {
-                    $proxy = $sp;
-                    $usedType = (string)($st['sticky_type']?? $type);
-                }else {
-                    debz_proxy_failover($sp,($probeStatus === 'refused')? 'dead': 'slow',($probeStatus === 'refused'));
-                    $forceNew = true;
-                }
-            }
-        }
-    }
-    if($proxy === '') {
-        $pk = debz_proxy_pick_live($type,$forceNew);
-        $proxy = $pk['proxy'];
-        if($pk['usedType']!== '')$usedType = $pk['usedType'];
-    }
-    if($proxy === '') {
-        // Tanpa grabber (khas APK: proxy-grabber/ tidak dibundle), nunggu
-        // pool 120 detik = gantung sia-sia. Langsung abort jujur.
-        $hasGrabber = is_file(__DIR__.'/proxy-grabber/proxy_grabber.py');
-        $waitSec = $hasGrabber? max(10,(int)getenv('AI_PROXY_POOL_WAIT')?: 120): 0;
-        if($waitSec > 0) {
-            if(function_exists('termEmit'))termEmit('warn','⚠️ Pool proxy kosong / gak ada yang live. Nunggu proxy-grabber, NO direct...');
-            if(function_exists('applog'))applog('PROXY','cli_pool_empty_wait',['type' => $type,'wait_sec' => $waitSec]);
-            if(debz_proxy_wait_pool($type,$waitSec)) {
-                unset($GLOBALS['_debz_proxy_tried_round']);
-                $pk2 = debz_proxy_pick_live($type,true);
-                $proxy = $pk2['proxy'];
-                if($pk2['usedType']!== '')$usedType = $pk2['usedType'];
-            }
-        } elseif(function_exists('applog')) {
-            applog('PROXY','cli_pool_empty_nograbber',['type' => $type]);
-        }
-    }
-    if($proxy === '') {
-        $GLOBALS['_debz_cli_proxy_empty']= true;
-        if(function_exists('termEmit'))termEmit('limit','⚠️ Pool proxy masih kosong setelah menunggu — run CLI dibatalkan, TANPA direct. Coba lagi.');
-        if(function_exists('applog'))applog('PROXY','cli_pool_empty_abort',['type' => $type]);
-        return['',[]];
-    }$GLOBALS['_debz_last_proxy']= $proxy;
-    if($usedType === '' || ! in_array($usedType,['http','socks4','socks5'],true))$usedType = 'http';
-    $scheme = 'http';
-    if($usedType === 'socks5')$scheme = 'socks5h';
-    elseif($usedType === 'socks4')$scheme = 'socks4a';
-    $proxyUrl = $scheme.'://'.$proxy;
-    $noProxy = 'localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.169.254';
-    $env = ['NODE_USE_ENV_PROXY' => '1','HTTPS_PROXY' => $proxyUrl,'https_proxy' => $proxyUrl,'HTTP_PROXY' => $proxyUrl,'http_proxy' => $proxyUrl,'ALL_PROXY' => $proxyUrl,'all_proxy' => $proxyUrl,'NO_PROXY' => $noProxy,'no_proxy' => $noProxy,];
-    return[$proxy,$env];
+    // PROXY-FREE BUILD: seluruh jalur proxy dibuang total. Chat selalu direct.
+    // Return kosong = direct, tanpa baca proxy_state, tanpa hold pool.
+    return['',[]];
 }
 // Preflight konektivitas sebelum spawn CLI (mode direct, tanpa proxy).
 // Di HP: kalau provider ga bisa dijangkau langsung, CLI gantung tanpa event
@@ -1869,7 +1802,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Pesan kosong** — tidak ada yang bisa diproses.\n"]]]]);
         if(function_exists('emitDone'))emitDone();
         return;
-    }$maxProxyTry = max(2,native_config_int('AI_CLI_PROXY_TRY',5));
+    }$maxProxyTry = 1;
     $cliBaseEnv = getenv();
     $cliProxy = '';
     $cliProxyEnv = [];
@@ -1884,25 +1817,8 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     $proxyTry ++) {
         $cliProxyFail = false;
         [$cliProxy,$cliProxyEnv]= debz_cli_proxy_pick();
-        for($hc = 0;
-        $hc < 5 && $cliProxy !== '';
-        $hc ++) {
-            $probeStatus = debz_proxy_probe_cached($cliProxy,3000);
-            if($probeStatus === 'ok' || $probeStatus === 'timeout')break;
-            if(function_exists('applog'))applog('PROXY','cli_hc_reject',['proxy' => $cliProxy,'status' => $probeStatus,'try' => $proxyTry + 1]);
-            debz_proxy_failover($cliProxy,($probeStatus === 'refused')? 'dead': 'slow',($probeStatus === 'refused'));
-            $GLOBALS['_debz_proxy_force_new']= true;
-            [$cliProxy,$cliProxyEnv]= debz_cli_proxy_pick();
-        }
-        if($cliProxy === '' && ! empty($GLOBALS['_debz_cli_proxy_empty'])) {
-            $GLOBALS['_debz_cli_proxy_empty']= false;
-            if(function_exists('termEmit'))termEmit('limit','⚠️ Run CLI dibatalkan: pool proxy kosong, nunggu grabber tapi belum ada proxy live (no forced direct).');
-            if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Run CLI di-hold**: pool proxy kosong dan proxy-grabber belum dapat proxy live. Gak ada forced direct — jalur chat sengaja ditahan. Coba lagi beberapa saat lagi ya.\n"]]]]);
-            if(function_exists('emitDone'))emitDone();
-            if(function_exists('applog'))applog('CLI','packet_proxy_pool_empty',[]);
-            return;
-        }
-        // Mode direct (khas APK: ga ada pool proxy di HP). Kalau provider ga
+        // PROXY-FREE: pick selalu direct (''). Hold pool dihapus total.
+        // Mode direct. Kalau provider ga
         // reachable, CLI gantung bisu sampai deadline 900s — gagalkan cepat
         // dengan pesan yang bisa dibaca user, jangan hening.
         if($cliProxy === '') {

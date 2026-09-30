@@ -469,12 +469,17 @@
     function deleteSession(id) {
         var s = getSession(id);
         if (!s) return;
+        // PROXY-FREE FIX: hapus sesi = force. Stream aktif di-abort dulu biar ga kekunci "tungguin kelar".
         var stD = sessionStreams[id];
         if (stD && stD.busy) {
-            showToast('Tungguin Debz kelar jawab dulu..');
-            return;
+            try { if (stD.abort) stD.abort.abort(); } catch(e2) {}
+            delete sessionStreams[id];
+            if (id === activeSessionId) { setBusy(false); hideProgressIfIdle(); }
+            showToast('Stream aktif di-stop, sesi dihapus');
         }
-        if (!confirm('Hapus session "' + s.title + '"? Semua chat di dalamnya bakal ilang permanen.')) return;
+        var cf = true;
+        try { cf = confirm('Hapus session "' + s.title + '"? Semua chat di dalamnya bakal ilang permanen.'); } catch(e3) { cf = true; }
+        if (!cf) return;
         var wasActive = (id === activeSessionId);
         sessions = sessions.filter(function(x) { return x.id !== id; });
         if (wasActive) {
@@ -590,8 +595,15 @@
     document.querySelectorAll('#clear-btn, .clear-btn').forEach(function(b) {
         b.addEventListener('click', function() {
             var stC = sessionStreams[activeSessionId];
-            if (stC && stC.busy) { showToast('Tungguin Debz kelar jawab dulu..'); return; }
-            if (confirm('Yakin mau hapus semua chat di session ini?')) clearAllChats();
+            if (stC && stC.busy) {
+                try { if (stC.abort) stC.abort.abort(); } catch(e2) {}
+                delete sessionStreams[activeSessionId];
+                setBusy(false);
+                hideProgressIfIdle();
+            }
+            var cf = true;
+            try { cf = confirm('Yakin mau hapus semua chat di session ini?'); } catch(e3) { cf = true; }
+            if (cf) clearAllChats();
         });
     });
 
@@ -2136,9 +2148,20 @@
     if (form) {
         form.addEventListener('submit', async function(e){
             e.preventDefault();
-            // Blokir cuma kalau session AKTIF masih streaming (stream lain boleh jalan di background)
+            // Blokir cuma kalau session AKTIF masih streaming (stream lain boleh jalan di background).
+            // Anti-kunci: stream zombie (>3 mnt tanpa selesai, mis. abort/hang) auto-reset biar chat ga mati permanen.
             var stA = sessionStreams[activeSessionId];
-            if (stA && stA.busy) { showToast('Tungguin Debz kelar jawab dulu..'); return; }
+            if (stA && stA.busy) {
+                var stAge = Date.now() - (stA.t0 || Date.now());
+                if (stAge > 180000) {
+                    try { if (stA.abort) stA.abort.abort(); } catch(e2) {}
+                    delete sessionStreams[activeSessionId];
+                    setBusy(false);
+                    hideProgressIfIdle();
+                    showToast('Stream macet ke-reset otomatis, kirim ulang ya');
+                    stA = null;
+                } else { showToast('Tungguin Debz kelar jawab dulu.. (stop = tombol kotak)'); return; }
+            }
             var text = input ? input.value.trim() : '';
             if (!text && selectedFiles.length === 0) return;
             if (text.length > MAX_CHARS) {
@@ -2188,7 +2211,7 @@
             var mySessionId = activeSessionId; // session yang boleh ditulis stream ini
             var mySessionObj = getSession(mySessionId); // object session asli (stream nulis ke sini walau pindah view)
             var abortController = new AbortController();
-            var myStream = { gen: myGen, abort: abortController, runId: '', kaId: kaStreamId, fullContent: '', rdItems: [], busy: true, el: null, assistantIndex: assistantIndex };
+            var myStream = { gen: myGen, abort: abortController, runId: '', kaId: kaStreamId, fullContent: '', rdItems: [], busy: true, el: null, assistantIndex: assistantIndex, t0: Date.now() };
             sessionStreams[mySessionId] = myStream;
 
             try {

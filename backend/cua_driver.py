@@ -298,11 +298,12 @@ def run(action: str, body: dict):
     """Dispatcher dipanggil endpoint /api/cua."""
     action = str(action or "").lower()
 
-    # Guard: kalau deps belum lengkap, kasih pesan jelas
+    # Guard: kalau deps belum lengkap, kasih pesan jelas.
+    # HP (proot): Xvfb/xdotool tidak dibundle di rootfs-mini (berat) -> arahkan ke browser/CDP WebView.
     if not _CUA_DEPS["ok"]:
         return {"ok": False,
-                "error": f"CUA deps belum lengkap: {', '.join(_CUA_DEPS['missing'])}. "
-                         f"Jalankan: pkg install x11-repo && pkg install {' '.join(_CUA_DEPS['missing'])}"}
+                "error": f"CUA Xvfb tidak tersedia di HP (kurang: {', '.join(_CUA_DEPS['missing'])}). "
+                          "Pakai tool `browser` (CDP WebView via cdp_chrome.py) buat debug frontend di HP."}
 
     start_xvfb()
 
