@@ -24,7 +24,7 @@ tar -xzf "$WORK/base.tar.gz" -C "$ROOTFS"
 
 echo ">> [2/7] unduh paket arm64 langsung dari ports (tanpa apt host)"
 python3 "$SCRIPT_DIR/fetch-arm64-debs.py" "$DEBS" \
-  bash dash procps \
+  bash dash procps curl \
   php8.3-fpm php8.3-cli php8.3-curl php8.3-sqlite3 php8.3-mbstring \
   nginx ca-certificates \
   python3 python3-venv

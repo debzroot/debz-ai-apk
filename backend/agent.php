@@ -717,6 +717,24 @@ function debz_cli_proxy_pick(): array {
 // Di HP: kalau provider ga bisa dijangkau langsung, CLI gantung tanpa event
 // error -> user lihat "ga ada balesan". Tangkap di sini, kasih pesan jelas.
 // Hasil di-cache per host selama request (static) biar retry loop ga probe ulang.
+// Kartu approval (card path) butuh binary curl (SSE + POST) + php-curl
+// (buat session). Rootfs lama tak punya keduanya -> fatal/bisu. Cek sekali
+// per request; kalau tak lengkap, pakai run path (terbukti jalan di HP).
+function debz_card_deps_ok(): bool {
+    static $ok = null;
+    if($ok !== null)return $ok;
+    if(! function_exists('curl_init')) {
+        $ok = false;
+        return $ok;
+    }
+    $bin = trim((string)@ shell_exec('command -v curl 2>/dev/null'));
+    if($bin === '' || ! @ is_executable($bin)) {
+        $ok = false;
+        return $ok;
+    }
+    $ok = true;
+    return $ok;
+}
 function debz_net_preflight(string $baseUrl) {
     static $cache = [];
     $host = strtolower((string)parse_url($baseUrl, PHP_URL_HOST));
@@ -1453,6 +1471,11 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     @ set_time_limit(0);
     global $emittedAnything,$doneSent;
     if(function_exists('applog'))applog('OPENCODE_CARD','start',['model' => $model,'thread' => substr($threadId,0,40),'user_len' => strlen($userText),'files' => count($attachFiles)]);
+    if(! debz_card_deps_ok()) {
+        if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Kartu approval butuh binary curl + php-curl** yang tak ada di rootfs lama. Update APK, atau nyalakan Tools (pakai jalur run langsung).\n"]]]]);
+        if(function_exists('emitDone'))emitDone();
+        return;
+    }
     $serverUrl = rtrim((string)($serveCfg['url']?? ''),'/');
     if($serverUrl === '')$serverUrl = 'http://127.0.0.1:'.(int)($serveCfg['port']?? 4096);
     $pass = (string)($serveCfg['password']?? '');
@@ -1881,9 +1904,13 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 if(function_exists('applog'))applog('OPENCODE_CLI','serve_marker_rebuilt',['port' => (int)$cand,'src' => $pw !== ''? 'password_file': 'marker']);
             }break;
         }
-        if($serveCfg !== null && ! $toolsOn && count($attachFiles)=== 0) {
+        if($serveCfg !== null && ! $toolsOn && count($attachFiles)=== 0 && debz_card_deps_ok()) {
             native_agent_run_opencode_card($P,$model,$userText,$openSession,$mapFile,$threadId,$serveCfg,$bin,$allowSessionIn,$attachFiles);
             return;
+        }
+        if($serveCfg !== null && ! $toolsOn && count($attachFiles)=== 0) {
+            if(function_exists('termEmit'))termEmit('warn','Binary curl tak ada di rootfs lama — kartu approval dilewat, pakai jalur run langsung. Update APK biar kartu jalan.');
+            if(function_exists('applog'))applog('OPENCODE_CLI','card_fallback_run',['reason' => 'curl-bin/php-curl missing']);
         }
         if($serveCfg !== null) {
             $cmd = [$bin,'run','--attach',(string)$serveCfg['url'],'--format','json','--no-replay','-m',$model];
