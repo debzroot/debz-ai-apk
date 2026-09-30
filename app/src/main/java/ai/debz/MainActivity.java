@@ -211,10 +211,17 @@ public class MainActivity extends Activity {
             if (apiPort <= 0) apiPort = 8092 + off;
             int toolsPort = DebzConfig.toolsPort(MainActivity.this);
             if (toolsPort <= 0) toolsPort = 9191 + off;
+            String upd = "";
+            try {
+                if (DebzConfig.updateAvailable(MainActivity.this)) {
+                    upd = DebzConfig.updateNote(MainActivity.this);
+                }
+            } catch (Exception ignored) {}
             return "{\"v\":\"" + OtaManager.currentVersion(MainActivity.this) + "\""
                 + ",\"root\":" + DebzConfig.rootMode(MainActivity.this)
                 + ",\"web\":" + webPort + ",\"api\":" + apiPort
-                + ",\"tools\":" + toolsPort + "}";
+                + ",\"tools\":" + toolsPort
+                + ",\"update\":\"" + upd.replace("\"", "") + "\"}";
         }
     }
 
@@ -233,6 +240,21 @@ public class MainActivity extends Activity {
                 autoLogin(appCtx, base);
             } catch (Exception e) {
                 android.util.Log.w("DebzAI", "auto-login skip: " + e);
+            }
+            // OTA rolling: cek rilisan sekali per buka (throttle 6 jam di
+            // dalam). Ada update = notif sistem + toast di chat.
+            try {
+                final String upd = OtaManager.checkForUpdate(appCtx);
+                if (upd != null && !upd.isEmpty()) {
+                    runOnUiThread(() -> {
+                        try {
+                            if (!isFinishing()) Toast.makeText(MainActivity.this,
+                                "⬆ Update tersedia: " + upd, Toast.LENGTH_LONG).show();
+                        } catch (Exception ignored) {}
+                    });
+                }
+            } catch (Exception e) {
+                android.util.Log.w("DebzAI", "ota check skip: " + e);
             }
             runOnUiThread(() -> {
                 try {

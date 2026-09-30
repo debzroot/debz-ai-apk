@@ -60,6 +60,7 @@ public class BootstrapService extends Service {
                 if (watchdogAlive(ctx)) {
                     android.util.Log.i("DebzAI", "stack sudah up + sentinel ok, skip boot");
                     DebzConfig.setStatus(ctx, "up");
+                    otaCheckAsync(ctx);
                     return;
                 }
                 // stack nyala tapi yatim (watchdog mati, sisa kill lama):
@@ -130,6 +131,7 @@ public class BootstrapService extends Service {
                 if (!ok) saveStackLog(ctx, out);
                 android.util.Log.i("DebzAI", "stack akhir ok=" + ok);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");
+                if (ok) otaCheckAsync(ctx);
             } else {
                 DebzConfig.setStatus(ctx, "no-rootfs");
             }
@@ -139,6 +141,23 @@ public class BootstrapService extends Service {
             android.util.Log.e("DebzAI", "boot gagal", e);
             DebzConfig.setStatus(ctx, "error:" + e.getClass().getSimpleName()
                 + ": " + e.getMessage());
+        }
+    }
+
+    // OTA rolling: cek rilisan di background (throttle 6 jam di dalam).
+    // Ada update = notif sistem, sekali per rilisan. Gagal = diam.
+    private static void otaCheckAsync(android.content.Context ctx) {
+        try {
+            final android.content.Context appCtx = ctx.getApplicationContext();
+            new Thread(() -> {
+                try {
+                    OtaManager.checkForUpdate(appCtx);
+                } catch (Exception e) {
+                    android.util.Log.w("DebzAI", "ota check skip: " + e);
+                }
+            }).start();
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "ota thread skip: " + e);
         }
     }
 

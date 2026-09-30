@@ -20,25 +20,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inject opencode session (tanpa API key)
+      - name: Inject opencode session (opsional, per-device auto)
         run: |
           if [ -n "${{ secrets.OPENCODE_SESSION_ID }}" ]; then
             sed -i "s|__OPENCODE_SESSION_ID__|${{ secrets.OPENCODE_SESSION_ID }}|g" backend/.ai-providers.json
-            echo "session injected"
+            echo "session injected dari secret"
           else
-            # 0.2.x lolos dengan placeholder -> APK 401 bisu. Sekarang: gagal
-            # eksplisit di sini, jangan kirim APK rusak ke user.
-            echo "::error::Secret OPENCODE_SESSION_ID kosong — build DIBATALKAN. Isi di repo Settings → Secrets → Actions, lalu re-run."
-            exit 1
+            # MULTI-USER: secret opsional. Placeholder dibiarkan — backend
+            # providers_autofix_sid() generate UUID per-HP saat first boot,
+            # jadi tiap user dapat session unik, anti 401 massal.
+            echo "::warning::Secret OPENCODE_SESSION_ID kosong — lanjut tanpa inject (auto-generate per-device aktif)."
           fi
           php -r '$d=json_decode(file_get_contents("backend/.ai-providers.json"),true); exit(isset($d["providers"]["debz"])?0:1);' \
             && echo "providers JSON OK"
-          # sabuk + suspender: pastikan placeholder benar-benar hilang
-          if grep -rq "__OPENCODE_SESSION_ID__" backend/; then
-            echo "::error::Placeholder session masih ada di backend/ setelah inject."
-            exit 1
-          fi
-          echo "session placeholder bersih"
 
       - name: Build rootfs-mini
         run: bash rootfs/build-rootfs.sh

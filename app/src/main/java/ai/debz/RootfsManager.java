@@ -21,8 +21,8 @@ public final class RootfsManager {
 
     // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
-    // 11 = proxy-free total (direct CLI) + zen probe skip + force hapus sesi.
-    private static final int ROOTFS_EPOCH = 11;
+    // 12 = session per-device auto + OTA notif update.
+    private static final int ROOTFS_EPOCH = 12;
 
     public interface Progress {
         void on(String stage, int percent);

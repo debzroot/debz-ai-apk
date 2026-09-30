@@ -5,14 +5,48 @@ function providers_rr_state_file() {
     return __DIR__.'/.ai-rr-state.json';
 }
 function providers_defaults() {
-    return['active' => 'debz','active_cli' => 'debz','active_webui' => 'debz','routing' => 'fixed','providers' =>['debz' =>['name' => 'Debz AI','base_url' => 'https://opencode.ai/zen/v1','api_key' => '','model' => 'debz_ai','mode' => 'native','enabled' => true]]];
+    return['active' => 'debz','active_cli' => 'debz','active_webui' => 'debz','routing' => 'fixed','providers' =>['debz' =>['name' => 'Debz AI','base_url' => 'https://opencode.ai/zen/v1','api_key' => '','model' => 'debz_ai','mode' => 'native','enabled' => true,'extra' =>['headers' =>['x-session-id' => providers_new_sid()]]]]];
+}
+function providers_new_sid() {
+    if(function_exists('random_bytes')) {
+        $b = random_bytes(16);
+        $b[6]= chr((ord($b[6])& 0x0f)| 0x40);
+        $b[8]= chr((ord($b[8])& 0x3f)| 0x80);
+        return vsprintf('%s%s-%s-%s-%s-%s%s%s',str_split(bin2hex($b),4));
+    }
+    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0x0fff)| 0x4000,mt_rand(0,0x3fff)| 0x8000,mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff));
+}
+function providers_autofix_sid(& $d) {
+    // MULTI-USER: tiap HP wajib session-id unik per-device. Placeholder CI
+    // (__OPENCODE_SESSION_ID__) atau sid kosong = generate UUID baru + simpan.
+    // Mencegah 401 massal gara-gara satu session dishare banyak HP.
+    if(! isset($d['providers'])|| ! is_array($d['providers']))return false;
+    $changed = false;
+    foreach($d['providers']as $id => & $p) {
+        if(! is_array($p))continue;
+        if(stripos((string)($p['base_url']?? ''),'opencode.ai/zen')=== false)continue;
+        $sid = '';
+        if(isset($p['extra'])&& is_array($p['extra'])&& isset($p['extra']['headers'])&& is_array($p['extra']['headers'])&& isset($p['extra']['headers']['x-session-id']))$sid = trim((string)$p['extra']['headers']['x-session-id']);
+        if($sid === '' || $sid === '__OPENCODE_SESSION_ID__') {
+            if(! isset($p['extra'])|| ! is_array($p['extra']))$p['extra']= [];
+            if(! isset($p['extra']['headers'])|| ! is_array($p['extra']['headers']))$p['extra']['headers']= [];
+            $p['extra']['headers']['x-session-id']= providers_new_sid();
+            $changed = true;
+        }
+    }
+    unset($p);
+    return $changed;
 }
 function providers_load() {
     $f = providers_file();
     if(file_exists($f)) {
         $d = json_decode((string)file_get_contents($f),true);
         if(is_array($d)&& isset($d['providers'])&& is_array($d['providers'])&& $d['providers']) {
-            return providers_scope_defaults($d);
+            $d = providers_scope_defaults($d);
+            if(providers_autofix_sid($d)) {
+                @ file_put_contents($f,json_encode($d,JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            }
+            return $d;
         }
     }
     return providers_defaults();

@@ -15,6 +15,10 @@ public final class DebzConfig {
     private static final String KEY_LOGIN_FAIL_UNTIL = "autologin_fail_until";
     private static final String KEY_ROOTFS_URL = "rootfs_url";
     private static final String KEY_PERM_ASKED = "file_perm_asked";
+    private static final String KEY_UPDATE_AVAILABLE = "update_available";
+    private static final String KEY_UPDATE_NOTE = "update_note";
+    private static final String KEY_LAST_UPDATE_CHECK = "last_update_check";
+    private static final String KEY_LAST_NOTIFIED_CI = "last_notified_ci";
 
     private DebzConfig() {}
 
@@ -93,5 +97,38 @@ public final class DebzConfig {
 
     public static void setLoginFailUntil(Context ctx, long until) {
         prefs(ctx).edit().putLong(KEY_LOGIN_FAIL_UNTIL, until).apply();
+    }
+
+    // OTA rolling ci-latest: flag update + throttle cek 6 jam.
+    public static boolean updateAvailable(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_UPDATE_AVAILABLE, false);
+    }
+
+    public static void setUpdateAvailable(Context ctx, boolean v) {
+        prefs(ctx).edit().putBoolean(KEY_UPDATE_AVAILABLE, v).apply();
+    }
+
+    public static String updateNote(Context ctx) {
+        return prefs(ctx).getString(KEY_UPDATE_NOTE, "");
+    }
+
+    public static void setUpdateNote(Context ctx, String note) {
+        prefs(ctx).edit().putString(KEY_UPDATE_NOTE, note != null ? note : "").apply();
+    }
+
+    public static long lastUpdateCheck(Context ctx) {
+        return prefs(ctx).getLong(KEY_LAST_UPDATE_CHECK, 0);
+    }
+
+    public static void setLastUpdateCheck(Context ctx, long t) {
+        prefs(ctx).edit().putLong(KEY_LAST_UPDATE_CHECK, t).apply();
+    }
+
+    public static String lastNotifiedCi(Context ctx) {
+        return prefs(ctx).getString(KEY_LAST_NOTIFIED_CI, "");
+    }
+
+    public static void setLastNotifiedCi(Context ctx, String v) {
+        prefs(ctx).edit().putString(KEY_LAST_NOTIFIED_CI, v != null ? v : "").apply();
     }
 }

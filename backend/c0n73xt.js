@@ -541,8 +541,13 @@
             try {
                 var info = JSON.parse(window.DebzAndroid.getInfo());
                 deviceEl.textContent = (info.root ? 'mode root' : 'mode non-root')
-                    + ' · web ' + info.web + ' · api ' + info.api + ' · tools ' + info.tools;
+                    + ' · web ' + info.web + ' · api ' + info.api + ' · tools ' + info.tools
+                    + (info.update ? ' · ⬆ update: ' + info.update : '');
                 deviceEl.hidden = false;
+                if (info.update && !window.__debzUpdToast) {
+                    window.__debzUpdToast = true;
+                    showToast('⬆ Update tersedia: ' + info.update + ' — cek rilisan ci-latest', 4500);
+                }
             } catch (e) {
                 deviceEl.remove();
             }

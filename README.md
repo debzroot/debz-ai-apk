@@ -25,15 +25,17 @@ stack up (php-fpm + nginx + opencode serve) → WebView ke backend lokal.
 CI (`.github/workflows/build.yml`): job `rootfs` → job `android` (needs).
 Artefak ada di tab Actions → run → Artifacts.
 
-### Wajib: secret OPENCODE_SESSION_ID
+### Session per-device (opsional: secret OPENCODE_SESSION_ID)
 
 Provider opencode-cli otentikasi via header `x-session-id` (tanpa API key).
-Repo menyimpan placeholder `__OPENCODE_SESSION_ID__`, CI inject dari secret:
+Repo menyimpan placeholder `__OPENCODE_SESSION_ID__`. Saat backend pertama
+jalan di HP, `providers_autofix_sid()` generate UUID v4 unik per-device +
+simpan ke `.ai-providers.json` — jadi tiap user otomatis dapat session sendiri,
+anti 401 massal, siap install banyak user.
 
-1. Salin `x-session-id` dari `.ai-providers.json` di mesin dev.
-2. GitHub repo → Settings → Secrets → Actions → New secret
-   `OPENCODE_SESSION_ID` = nilainya.
-3. Tanpa secret: APK tetap kebuild, tapi chat 401.
+Secret `OPENCODE_SESSION_ID` (repo Settings → Secrets → Actions) sifatnya
+OPSIONAL: kalau diisi, CI inject sebagai seed awal; kalau kosong, build tetap
+jalan (warning) dan HP generate sendiri.
 
 ### Alur first-run di HP
 
