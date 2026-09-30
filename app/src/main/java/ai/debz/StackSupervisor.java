@@ -40,10 +40,10 @@ public final class StackSupervisor {
                                Map<String, String> env) throws Exception {
         firstBoot(ctx, rootfs, env);
         Process p = ProotManager.exec(ctx, rootfs, env, "/opt/debz/start-stack.sh");
-        String out = drain(p.getInputStream());
-        // skrip melaunch daemon lalu exit; kalau macet (pipe ketahan dsb),
-        // jangan gantung selamanya — daemon yang udah naik tetap dipakai.
+        // drain() tanpa timeout = gantung selamanya kalau child macet:
+        // tunggu exit dulu (timeout), baru baca sisa output non-blocking.
         boolean done = p.waitFor(180, java.util.concurrent.TimeUnit.SECONDS);
+        String out = drainAvailable(p.getInputStream());
         if (!done) p.destroyForcibly();
         return out;
     }
@@ -93,8 +93,9 @@ public final class StackSupervisor {
         File done = new File(rootfs, "opt/debz/.pydeps-done");
         if (done.exists()) return;
         Process p = ProotManager.exec(ctx, rootfs, env, "/opt/debz/first-boot-pip.sh");
-        drain(p.getInputStream());
-        if (!p.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly();
+        boolean finished = p.waitFor(300, java.util.concurrent.TimeUnit.SECONDS);
+        drainAvailable(p.getInputStream());
+        if (!finished) p.destroyForcibly();
     }
 
     private static String drain(InputStream in) throws Exception {
@@ -103,5 +104,29 @@ public final class StackSupervisor {
         int n;
         while ((n = in.read(tmp)) > 0) buf.write(tmp, 0, n);
         return new String(buf.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    // baca output yang sudah tersedia TANPA blocking (dipakai setelah
+    // waitFor-timeout; drain() biasa gantung kalau child belum exit).
+    private static String drainAvailable(InputStream in) {
+        try {
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            byte[] tmp = new byte[8192];
+            long deadline = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < deadline) {
+                int avail = in.available();
+                if (avail <= 0) {
+                    Thread.sleep(100);
+                    continue;
+                }
+                int n = in.read(tmp, 0, Math.min(avail, tmp.length));
+                if (n <= 0) break;
+                buf.write(tmp, 0, n);
+                deadline = System.currentTimeMillis() + 500;
+            }
+            return new String(buf.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "";
+        }
     }
 }

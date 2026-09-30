@@ -147,7 +147,12 @@ public class MainActivity extends Activity {
         boolean up = "up".equals(raw);
         splashStage.setText(humanize(raw));
         if (pct >= 0) {
+            splashBar.setIndeterminate(false);
             splashBar.setProgress(pct);
+        } else {
+            // stage tanpa persen (starting-stack dsb): animasi jalan biar
+            // bar ga keliatan mentok palsu di angka lama ("100% tipu-tipu").
+            splashBar.setIndeterminate(true);
         }
         // belum up = splash loading; up = langsung chat, tanpa reload manual.
         splash.setVisibility(up ? View.GONE : View.VISIBLE);

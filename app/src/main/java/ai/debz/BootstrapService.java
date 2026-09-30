@@ -14,6 +14,9 @@ public class BootstrapService extends Service {
     public static final String EXTRA_OFFSET = "ai.debz.EXTRA_OFFSET";
     private static final int NOTIF_ID = 1001;
     private static final String CHANNEL = "debz_backend";
+    // cegah boot ganda numpuk (buka-tutup app cepat = proot pip dobel).
+    private static final java.util.concurrent.atomic.AtomicBoolean BOOTING =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -25,6 +28,15 @@ public class BootstrapService extends Service {
     }
 
     private void boot(int offset, android.content.Context ctx) {
+        if (!BOOTING.compareAndSet(false, true)) return;
+        try {
+            bootInner(offset, ctx);
+        } finally {
+            BOOTING.set(false);
+        }
+    }
+
+    private void bootInner(int offset, android.content.Context ctx) {
         DebzConfig.setStatus(ctx, "booting");
         try {
             RootfsManager.selfHeal(ctx);
