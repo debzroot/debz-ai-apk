@@ -21,7 +21,8 @@ public final class RootfsManager {
 
     // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
-    private static final int ROOTFS_EPOCH = 9;
+    // 10 = backend direct-DNS (tanpa DoH pin 8.8.8.8) + sunyi proxy.
+    private static final int ROOTFS_EPOCH = 10;
 
     public interface Progress {
         void on(String stage, int percent);
