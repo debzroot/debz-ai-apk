@@ -34,6 +34,8 @@ public class MainActivity extends Activity {
     private WebView autoWeb;
     private Handler poll;
     private boolean webLoaded;
+    private boolean webError;
+    private int webRetries;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,9 +86,14 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
+                // subresource (favicon/img) gagal = JANGAN timpuk seluruh
+                // chat. Cuma main frame yang boleh ganti halaman + retry.
+                if (request != null && !request.isForMainFrame()) return;
+                webError = true;
                 view.loadData("<h3>Backend belum siap.</h3>"
                     + "<p>Status: " + DebzConfig.status(MainActivity.this) + "</p>"
-                    + "<p>" + hintFor(DebzConfig.status(MainActivity.this)) + "</p>",
+                    + "<p>" + hintFor(DebzConfig.status(MainActivity.this)) + "</p>"
+                    + "<p>Mencoba ulang otomatis\u2026</p>",
                     "text/html", "utf-8");
             }
         });
@@ -161,9 +168,17 @@ public class MainActivity extends Activity {
         } else if (!up && web.getVisibility() == View.VISIBLE) {
             web.setVisibility(View.GONE);
         }
-        if ("up".equals(raw) && !webLoaded) {
+        // load sekali saat up; kalau main frame error: retry otomatis di
+        // poll berikutnya (maks 5x). Tanpa ini user WAJIB close-reopen
+        // manual tiap load pertama race dengan nginx.
+        if ("up".equals(raw) && (!webLoaded || (webError && webRetries < 5))) {
             webLoaded = true;
+            webError = false;
+            webRetries++;
             loadBackend();
+        }
+        if (!"up".equals(raw)) {
+            webRetries = 0;
         }
     }
 
