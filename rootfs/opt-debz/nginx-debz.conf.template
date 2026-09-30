@@ -15,6 +15,12 @@ http {
             fastcgi_pass 127.0.0.1:@FPM@;
             fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
             include /etc/nginx/fastcgi_params;
+            # Desktop (webui-nginx.conf) pakai 3600: chat SSE jalan menit-menit
+            # (apalagi via proxy gratis yang lambat). Default nginx 60 dtk =
+            # stream kepotong tengah jalan -> frontend "Maaf, Gak ada balesan".
+            fastcgi_read_timeout 3600;
+            fastcgi_send_timeout 3600;
+            fastcgi_buffering off;
         }
     }
 }

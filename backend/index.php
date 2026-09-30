@@ -224,7 +224,7 @@ function get_file_version ($path )
                 <button type="button" id="provider-btn" class="st-btn" title="Ganti Provider / Model"><span class="st-ico">🧠</span><span class="st-lbl">Provider</span></button>
                 <button type="button" id="compact-btn" class="st-btn" title="Ringkas context jadi summary (hemat token)"><span class="st-ico">🗜️</span><span class="st-lbl">Compact</span></button>
                 <button type="button" id="settings-btn" class="st-btn" title="Settings Provider"><span class="st-ico">⚙️</span><span class="st-lbl">Settings</span></button>
-                <button type="button" id="proxy-btn" class="st-btn" title="Proxy Manager — grab proxy fresh & route chat (bypass rate limit)"><span class="st-ico">🕵️</span><span class="st-lbl">Proxy</span></button>
+                <button type="button" id="proxy-btn" class="st-btn" title="Proxy — klik atur di Settings"><span class="st-ico">🕵️</span><span class="st-lbl">Proxy</span></button>
                 <button type="button" id="export-btn" class="st-btn" title="Export Chat"><span class="st-ico">📤</span><span class="st-lbl">Export</span></button>
                 <button type="button" id="clear-btn" class="st-btn" title="Bersihin Chat Session Ini"><span class="st-ico">🧹</span><span class="st-lbl">Clear</span></button>
                 <button type="button" id="android-term-btn" class="st-btn" title="Terminal HP — shell proot" hidden><span class="st-ico">📟</span><span class="st-lbl">Terminal</span></button>
@@ -250,7 +250,7 @@ function get_file_version ($path )
             </div>
             <div class="header-right" style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
                 <button type="button" class="header-btn install-btn" id="install-btn" title="Install sebagai App (PWA)" hidden>Install</button>
-                <span id="proxy-badge" title="Proxy aktif yang dipakai chat sekarang" style="display:none;font-size:10px;font-weight:700;padding:4px 10px;border-radius:10px;border:1px solid #4ade80;color:#4ade80;background:rgba(74,222,128,0.12);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;cursor:pointer" onclick="window.open('http://'+location.hostname+':8766/','_blank')">🌐 -</span>
+                <span id="proxy-badge" title="Proxy aktif yang dipakai chat sekarang — klik untuk atur" style="display:none;font-size:10px;font-weight:700;padding:4px 10px;border-radius:10px;border:1px solid #4ade80;color:#4ade80;background:rgba(74,222,128,0.12);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;cursor:pointer" onclick="(function(){var b=document.getElementById('proxy-btn');if(b)b.click();})()">🌐 -</span>
                 <button type="button" class="header-btn theme-toggle" id="theme-toggle" title="Mode Gelap">🌙</button>
 
                 <button type="button" class="header-btn pane-toggle" id="act-pane-toggle" title="Live Agent — show/hide jendela review">A_</button>
@@ -288,15 +288,21 @@ function get_file_version ($path )
                 <div id="settings-providers"></div>
                 <button type="button" class="settings-add" id="settings-add">+ Tambah Provider</button>
                 <div id="mp-box" style="margin-top:14px;border-top:1px solid var(--ink);padding-top:10px;">
-                    <div style="font-weight:700;margin-bottom:6px;">🌐 Proxy Manual (HP)</div>
-                    <div style="font-size:11.5px;color:var(--txt-dim);line-height:1.5;margin-bottom:8px;">HP tidak punya proxy-grabber — kalau internet langsung ke provider diblokir, isi proxy manual di sini. Dikosongkan = direct.</div>
+                    <div style="font-weight:700;margin-bottom:6px;">🌐 Proxy (HP)</div>
+                    <div id="mp-auto-row" style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-bottom:8px;">
+                        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
+                            <input type="checkbox" id="mp-auto" checked /> Auto (grabber refresh tiap 60 dtk)
+                        </label>
+                        <span id="mp-auto-status" style="font-size:12px;"></span>
+                    </div>
+                    <div style="font-size:11.5px;color:var(--txt-dim);line-height:1.5;margin-bottom:8px;">Auto mati + manual kosong = direct. Manual mengalahkan auto.</div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
                         <select id="mp-type" style="flex:1;min-width:90px;">
                             <option value="http">http</option>
                             <option value="socks5">socks5</option>
                             <option value="socks4">socks4</option>
                         </select>
-                        <input id="mp-host" placeholder="host / IP proxy" autocomplete="off" style="flex:2;min-width:130px;" />
+                        <input id="mp-host" placeholder="host / IP proxy manual" autocomplete="off" style="flex:2;min-width:130px;" />
                         <input id="mp-port" placeholder="port" inputmode="numeric" autocomplete="off" style="flex:1;min-width:70px;" />
                     </div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
@@ -305,7 +311,7 @@ function get_file_version ($path )
                     </div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                         <button type="button" id="mp-save">💾 Simpan &amp; Tes</button>
-                        <button type="button" id="mp-clear">🗑️ Hapus</button>
+                        <button type="button" id="mp-clear">🗑️ Hapus manual</button>
                         <span id="mp-status" style="font-size:12px;"></span>
                     </div>
                 </div>
@@ -314,32 +320,53 @@ function get_file_version ($path )
                     var box = document.getElementById('mp-box');
                     if (!box) return;
                     function $(id){ return document.getElementById(id); }
-                    function paint(d){
+                    function paintManual(m){
                         var st = $('mp-status');
-                        if (!d || d.set === false) {
+                        if (!m || m.set === false) {
                             st.style.color = '';
-                            st.textContent = 'Mode: direct (tanpa proxy)';
+                            st.textContent = 'Manual: kosong';
                             return;
                         }
-                        if (d.live) {
+                        if (m.live) {
                             st.style.color = 'var(--green)';
-                            st.textContent = '● LIVE ' + d.type + '://' + d.host + ':' + d.port;
+                            st.textContent = '● Manual LIVE ' + m.type + '://' + m.host + ':' + m.port;
                         } else {
                             st.style.color = 'var(--red)';
-                            st.textContent = '● MATI (' + (d.probe || '?') + ') ' + (d.message || '');
+                            st.textContent = '● Manual MATI (' + (m.probe || '?') + ')';
                         }
+                    }
+                    function paintAuto(a){
+                        var st = $('mp-auto-status');
+                        var cb = $('mp-auto');
+                        if (!a) return;
+                        cb.checked = !!a.on;
+                        if (!a.on) {
+                            st.style.color = '';
+                            st.textContent = 'mati';
+                        } else if (a.pool_n > 0) {
+                            st.style.color = 'var(--green)';
+                            st.textContent = '● ' + a.pool_n + ' live' + (a.age_s >= 0 ? ' (' + a.age_s + ' dtk lalu)' : '');
+                        } else {
+                            st.style.color = 'var(--red)';
+                            st.textContent = '● pool kosong (grabber jalan?)';
+                        }
+                    }
+                    function paint(d){
+                        if (!d) return;
+                        paintManual(d.manual);
+                        paintAuto(d.auto);
                     }
                     function load(){
                         fetch('api.php?action=manual_proxy', {cache:'no-store'})
                             .then(function(r){ return r.json(); })
                             .then(function(d){
-                                if (d && d.set) {
-                                    $('mp-type').value = d.type || 'http';
-                                    $('mp-host').value = d.host || '';
-                                    $('mp-port').value = d.port || '';
+                                if (d && d.manual && d.manual.set) {
+                                    $('mp-type').value = d.manual.type || 'http';
+                                    $('mp-host').value = d.manual.host || '';
+                                    $('mp-port').value = d.manual.port || '';
                                     $('mp-user').value = '';
                                     $('mp-pass').value = '';
-                                    $('mp-pass').placeholder = d.has_auth ? '******** (tersimpan)' : 'pass (opsional)';
+                                    $('mp-pass').placeholder = d.manual.has_auth ? '******** (tersimpan)' : 'pass (opsional)';
                                 }
                                 paint(d);
                             })
@@ -360,7 +387,11 @@ function get_file_version ($path )
                         }).then(function(r){ return r.json(); })
                           .then(function(d){
                               if (!d.success) { $('mp-status').style.color = 'var(--red)'; $('mp-status').textContent = d.error || 'gagal simpan'; return; }
-                              load();
+                              if (d.manual && d.manual.set) {
+                                  $('mp-user').value = '';
+                                  $('mp-pass').value = '';
+                              }
+                              paint(d);
                               if (window.showToast) window.showToast(d.message || 'proxy tersimpan');
                           })
                           .catch(function(){ $('mp-status').textContent = 'gagal simpan proxy'; });
@@ -371,12 +402,30 @@ function get_file_version ($path )
                             headers:{'Content-Type':'application/json'},
                             body: JSON.stringify({op:'clear'})
                         }).then(function(r){ return r.json(); })
-                          .then(function(){ $('mp-host').value=''; $('mp-port').value=''; $('mp-user').value=''; $('mp-pass').value=''; load(); })
+                          .then(function(d){
+                              $('mp-host').value=''; $('mp-port').value=''; $('mp-user').value=''; $('mp-pass').value='';
+                              $('mp-pass').placeholder = 'pass (opsional)';
+                              paint(d);
+                              if (window.showToast) window.showToast(d.message || 'manual dihapus');
+                          })
                           .catch(function(){ $('mp-status').textContent = 'gagal hapus proxy'; });
+                    };
+                    $('mp-auto').onchange = function(){
+                        fetch('api.php?action=manual_proxy', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({op:'auto', on: $('mp-auto').checked})
+                        }).then(function(r){ return r.json(); })
+                          .then(function(d){ paint(d); })
+                          .catch(function(){ load(); });
                     };
                     var sb = document.getElementById('settings-btn');
                     if (sb) sb.addEventListener('click', load);
                     load();
+                    setInterval(function(){
+                        var p = document.getElementById('settings-panel');
+                        if (p && !p.hidden) load();
+                    }, 15000);
                 })();
                 </script>
             </div>
@@ -454,36 +503,51 @@ function get_file_version ($path )
 "></script>
 
 <script>
-// Proxy Manager — klik sidebar = HANYA nyalain service + buka page Deproxy.
-// Stop/kill service (port + grabber) ada di tombol dalam page Deproxy.
+// APK/HP: tidak ada Deproxy :8766 maupun proxy_start.php (desktop-only).
+// Tombol sidebar dialihkan ke section Proxy di Settings — yang beneran
+// jalan (auto-grabber + manual). Tanpa ini tombol = mati total.
 (function(){
     var b = document.getElementById('proxy-btn');
     if (!b) return;
     function setBtn(on){
         b.classList.toggle('on', !!on);
-        b.title = on
-            ? 'Proxy Manager AKTIF — klik buka Deproxy (stop service ada di dalam page)'
-            : 'Proxy Manager — nyalakan service & buka Deproxy';
+        b.title = on ? 'Proxy AKTIF — klik atur di Settings' : 'Proxy — klik atur di Settings';
     }
     window.DEBZ_setProxyBtn = setBtn;
     b.addEventListener('click', function(){
-        var proxyPort = (window.DEBZ_PROXY_PORT || '8766');
-        var base = 'http://' + location.hostname + ':' + proxyPort;
-        function openDash(){ window.open(base + '/', '_blank'); }
-        function tryHealth(retry){
-            fetch(base + '/api/health', {method:'GET', cache:'no-store'})
-                .then(function(r){ return r.ok; })
-                .catch(function(){ return false; })
-                .then(function(alive){
-                    if (alive) { setBtn(true); openDash(); return; } // udah nyala → langsung buka
-                    if (retry >= 4) { openDash(); return; } // fallback: buka saja
-                    // minta backend hidupkan (aman: hanya localhost/LAN)
-                    fetch('/proxy_start.php', {method:'POST'}).catch(function(){});
-                    setTimeout(function(){ tryHealth(retry + 1); }, 900);
-                });
+        var bd = document.getElementById('settings-backdrop');
+        var p = document.getElementById('settings-panel');
+        if (bd) bd.hidden = false;
+        if (p) {
+            p.hidden = false;
+            var mp = document.getElementById('mp-box');
+            if (mp && mp.scrollIntoView) {
+                try { mp.scrollIntoView({block:'start'}); } catch(e) {}
+            }
         }
-        tryHealth(0);
+        fetch('api.php?action=manual_proxy', {cache:'no-store'})
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                var live = false;
+                if (d) {
+                    if (d.manual && d.manual.set && d.manual.live) live = true;
+                    if (d.auto && d.auto.on && d.auto.pool_n > 0) live = true;
+                }
+                setBtn(live);
+            })
+            .catch(function(){});
     });
+    fetch('api.php?action=manual_proxy', {cache:'no-store'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            var live = false;
+            if (d) {
+                if (d.manual && d.manual.set && d.manual.live) live = true;
+                if (d.auto && d.auto.on && d.auto.pool_n > 0) live = true;
+            }
+            setBtn(live);
+        })
+        .catch(function(){});
 })();
 
 </script>

@@ -663,48 +663,52 @@ if(isset($_GET['action'])&& $_GET['action']=== 'proxy_next') {
     echo json_encode(['success' => true,'old' => $old,'proxy' => $proxy,'sticky' => (string)($st2['sticky_proxy']?? ''),'sticky_type' => (string)($st2['sticky_type']?? $usedType),'rr_index' => (int)($st2['rr_index']?? 0),'mode' => (string)($st2['mode']?? 'proxy'),'type' => $usedType,'rotation' => (string)($st2['rotation']?? 'roundrobin'),'pool_size' => $poolN,'message' => $proxy !== ''? 'Proxy diganti: '.$proxy: 'Pool kosong — nunggu proxy-grabber, TANPA direct',],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
-// Proxy manual (khas APK/HP): proxy-grabber tidak dibundle, jadi satu-satunya
-// cara pakai proxy = tulis manual. Format pool/state SAMA kayak grabber biar
-// seluruh mesin pick/sticky/failover yang sudah teruji langsung kepakai.
+// Proxy di HP (v2): MANUAL (user isi) vs AUTO (grabber refresh tiap 60
+// dtk) DILAPORKAN TERPISAH. v1 mencampur: pool auto yang keisi ulang bikin
+// UI ngira manual "gak kehapus". Format pool/state SAMA kayak grabber biar
+// mesin pick/sticky/failover yang sudah teruji langsung kepakai.
 if(isset($_GET['action'])&& $_GET['action']=== 'manual_proxy') {
     header('Content-Type: application/json');
     require_once __DIR__.'/agent.php';
     $readManual = function(): array {
         $out = ['set' => false,'type' => 'http','host' => '','port' => 0,'has_auth' => false,'live' => false,'probe' => ''];
-        foreach(['http','socks5','socks4'] as $t) {
-            $lf = debz_proxy_list_file($t);
-            if(! is_file($lf))continue;
-            $lines = @ file($lf,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            if(! is_array($lines))continue;
-            foreach($lines as $ln) {
-                $ln = trim((string)$ln);
-                if($ln === '')continue;
-                $pu = @ parse_url('http://'.$ln);
-                if(empty($pu['host'])|| empty($pu['port']))continue;
-                $out = ['set' => true,'type' => $t,'host' => (string)$pu['host'],'port' => (int)$pu['port'],'has_auth' => isset($pu['user']),'live' => false,'probe' => ''];
-                break 2;
-            }
-        }
-        if($out['set']) {
-            $st = debz_proxy_load_state();
-            if(is_array($st)&& ($st['manual']?? false)) {
-                $line = '';
-                $lf = debz_proxy_list_file($out['type']);
-                $lines = @ file($lf,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-                if(is_array($lines))foreach($lines as $ln) {
-                    $ln = trim((string)$ln);
-                    if($ln !== '') { $line = $ln; break; }
-                }
-                if($line !== '') {
-                    $out['probe'] = debz_proxy_probe_cached($line,4000);
-                    $out['live'] = ($out['probe'] === 'ok' || $out['probe'] === 'timeout');
-                }
-            }
+        $st = debz_proxy_load_state();
+        if(! is_array($st)|| empty($st['manual']))return $out;
+        $t = (string)($st['type']?? 'http');
+        $lf = debz_proxy_list_file($t);
+        $lines = is_file($lf)? @ file($lf,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES):[];
+        if(! is_array($lines))return $out;
+        foreach($lines as $ln) {
+            $ln = trim((string)$ln);
+            if($ln === '')continue;
+            $pu = @ parse_url('http://'.$ln);
+            if(empty($pu['host'])|| empty($pu['port']))continue;
+            $out = ['set' => true,'type' => $t,'host' => (string)$pu['host'],'port' => (int)$pu['port'],'has_auth' => isset($pu['user']),'live' => false,'probe' => ''];
+            $out['probe'] = debz_proxy_probe_cached($ln,4000);
+            $out['live'] = ($out['probe'] === 'ok' || $out['probe'] === 'timeout');
+            break;
         }
         return $out;
     };
+    $readAuto = function(): array {
+        $st = debz_proxy_load_state();
+        $on = ! is_array($st)|| ($st['auto']?? true)!== false;
+        if(is_array($st)&& ! empty($st['manual']))$on = false;
+        $n = 0;
+        $age = -1;
+        $lf = debz_proxy_list_file('http');
+        if(is_file($lf)) {
+            $lines = @ file($lf,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if(is_array($lines))foreach($lines as $ln) {
+                if(trim((string)$ln) !== '')$n ++;
+            }
+            $mt = @ filemtime($lf);
+            if($mt)$age = time()- (int)$mt;
+        }
+        return ['on' => $on,'pool_n' => $n,'age_s' => $age];
+    };
     if($_SERVER['REQUEST_METHOD']=== 'GET') {
-        echo json_encode(['success' => true] + $readManual(),JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        echo json_encode(['success' => true,'manual' => $readManual(),'auto' => $readAuto()],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
     if($_SERVER['REQUEST_METHOD']!== 'POST') {
@@ -714,14 +718,31 @@ if(isset($_GET['action'])&& $_GET['action']=== 'manual_proxy') {
     }
     $in = json_decode((string)file_get_contents('php://input'),true);
     if(! is_array($in))$in = [];
+    if(($in['op']?? '')=== 'auto') {
+        $want = ! empty($in['on']);
+        debz_proxy_state_update(function(array $s)use($want): array {
+            if($want) {
+                unset($s['auto']);
+                if(empty($s['manual']))$s['mode'] = 'proxy';
+            } else {
+                $s['auto'] = false;
+                if(empty($s['manual']))$s['mode'] = 'direct';
+            }
+            return $s;
+        });
+        if(function_exists('applog'))applog('PROXY','auto_toggle',['on' => $want]);
+        echo json_encode(['success' => true,'auto' => $readAuto(),'message' => $want? 'Auto-proxy NYALA (refresh tiap 60 dtk)': 'Auto-proxy MATI (mode direct)']);
+        exit;
+    }
     if(($in['op']?? '')=== 'clear') {
         foreach(['http','socks5','socks4'] as $t)@ unlink(debz_proxy_list_file($t));
         debz_proxy_state_update(function(array $s): array {
             unset($s['manual'],$s['sticky_proxy'],$s['sticky_type']);
-            $s['mode'] = 'direct';
+            $s['mode'] = (($s['auto']?? true)=== false)? 'direct': 'proxy';
             return $s;
         });
-        echo json_encode(['success' => true,'set' => false,'message' => 'Proxy manual dihapus, kembali direct']);
+        if(function_exists('applog'))applog('PROXY','manual_clear',[]);
+        echo json_encode(['success' => true,'manual' => $readManual(),'auto' => $readAuto(),'message' => 'Proxy manual dihapus']);
         exit;
     }
     $type = strtolower(trim((string)($in['type']?? 'http')));
@@ -775,7 +796,7 @@ if(isset($_GET['action'])&& $_GET['action']=== 'manual_proxy') {
     $probe = debz_proxy_probe_cached($line,4000);
     $live = ($probe === 'ok' || $probe === 'timeout');
     if(function_exists('applog'))applog('PROXY','manual_set',['type' => $type,'host' => $host,'port' => $port,'live' => $live,'probe' => $probe]);
-    echo json_encode(['success' => true,'set' => true,'type' => $type,'host' => $host,'port' => $port,'has_auth' => $user !== '','live' => $live,'probe' => $probe,'message' => $live? 'Proxy manual aktif & live: '.$host.':'.$port: 'Tersimpan, tapi proxy TIDAK live (probe: '.$probe.') — chat akan gagal, cek host/port'],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    echo json_encode(['success' => true,'manual' => $readManual(),'auto' => $readAuto(),'message' => $live? 'Proxy manual aktif & live: '.$host.':'.$port: 'Tersimpan, tapi proxy TIDAK live (probe: '.$probe.') — chat akan gagal, cek host/port'],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 if(isset($_GET['action'])&& $_GET['action']=== 'model') {
