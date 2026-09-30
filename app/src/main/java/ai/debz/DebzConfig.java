@@ -12,6 +12,7 @@ public final class DebzConfig {
     private static final String KEY_ROOT = "mode_root";
     private static final String KEY_TOKEN = "gh_token";
     private static final String KEY_STATUS = "stack_status";
+    private static final String KEY_LOGIN_FAIL_UNTIL = "autologin_fail_until";
     private static final String KEY_ROOTFS_URL = "rootfs_url";
     private static final String KEY_PERM_ASKED = "file_perm_asked";
 
@@ -81,8 +82,16 @@ public final class DebzConfig {
     public static boolean permAsked(Context ctx) {
         return prefs(ctx).getBoolean(KEY_PERM_ASKED, false);
     }
-
     public static void setPermAsked(Context ctx) {
         prefs(ctx).edit().putBoolean(KEY_PERM_ASKED, true).apply();
+    }
+
+    // auto-login gagal -> jangan hammer (backend lockout 5x -> 429 15 mnt).
+    public static long loginFailUntil(Context ctx) {
+        return prefs(ctx).getLong(KEY_LOGIN_FAIL_UNTIL, 0);
+    }
+
+    public static void setLoginFailUntil(Context ctx, long until) {
+        prefs(ctx).edit().putLong(KEY_LOGIN_FAIL_UNTIL, until).apply();
     }
 }

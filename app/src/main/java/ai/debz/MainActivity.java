@@ -221,7 +221,107 @@ public class MainActivity extends Activity {
     private void loadBackend() {
         int port = DebzConfig.webPort(this);
         if (port <= 0) port = 8091 + DebzConfig.portOffset(this);
-        web.loadUrl("http://127.0.0.1:" + port + "/");
+        final String base = "http://127.0.0.1:" + port + "/";
+        final android.content.Context appCtx = getApplicationContext();
+        // auto-login: backend localhost + password default 1337 (sama kayak
+        // README, ikut kebundle di APK). Target = buka app langsung chat,
+        // tanpa ketik password. SATU percobaan per buka; gagal = fallback ke
+        // load biasa (ketik manual). Fail-flag 15 mnt biar tidak hammer
+        // (backend lockout 5x salah -> 429).
+        new Thread(() -> {
+            try {
+                autoLogin(appCtx, base);
+            } catch (Exception e) {
+                android.util.Log.w("DebzAI", "auto-login skip: " + e);
+            }
+            runOnUiThread(() -> {
+                try {
+                    if (web != null && !isFinishing()) web.loadUrl(base);
+                } catch (Exception ignored) {}
+            });
+        }).start();
+    }
+
+    private static volatile boolean cookieHooked;
+
+    private static void autoLogin(android.content.Context ctx, String base) throws Exception {
+        if (System.currentTimeMillis() < DebzConfig.loginFailUntil(ctx)) return;
+        if (!cookieHooked) {
+            cookieHooked = true;
+            try {
+                java.net.CookieHandler.setDefault(new java.net.CookieManager());
+            } catch (Exception ignored) {}
+        }
+        String html = httpGet(base);
+        if (!html.contains("auth_password")) return;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+            "name=\"csrf_token\"\\s+value=\"([^\"]+)\"").matcher(html);
+        if (!m.find()) {
+            DebzConfig.setLoginFailUntil(ctx, System.currentTimeMillis() + 15 * 60 * 1000L);
+            return;
+        }
+        String after = httpPost(base, "auth_password=1337&csrf_token="
+            + java.net.URLEncoder.encode(m.group(1), "UTF-8"));
+        if (after.contains("auth_password")) {
+            DebzConfig.setLoginFailUntil(ctx, System.currentTimeMillis() + 15 * 60 * 1000L);
+            return;
+        }
+        DebzConfig.setLoginFailUntil(ctx, 0);
+        android.webkit.CookieManager wm = android.webkit.CookieManager.getInstance();
+        wm.setAcceptCookie(true);
+        java.net.CookieHandler h = java.net.CookieHandler.getDefault();
+        if (h instanceof java.net.CookieManager) {
+            for (java.net.HttpCookie c :
+                    ((java.net.CookieManager) h).getCookieStore().getCookies()) {
+                wm.setCookie(base, c.toString());
+            }
+        }
+        wm.flush();
+    }
+
+    private static String httpGet(String url) throws Exception {
+        java.net.HttpURLConnection c =
+            (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(5000);
+        c.setReadTimeout(8000);
+        try {
+            return readCapped(c);
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private static String httpPost(String url, String body) throws Exception {
+        byte[] b = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        java.net.HttpURLConnection c =
+            (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(5000);
+        c.setReadTimeout(8000);
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        c.setRequestProperty("Content-Length", String.valueOf(b.length));
+        try (java.io.OutputStream o = c.getOutputStream()) {
+            o.write(b);
+        }
+        try {
+            return readCapped(c);
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private static String readCapped(java.net.HttpURLConnection c) throws Exception {
+        try (java.io.InputStream in = c.getInputStream()) {
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            byte[] tmp = new byte[8192];
+            int n, total = 0;
+            while ((n = in.read(tmp)) > 0 && total < 65536) {
+                buf.write(tmp, 0, n);
+                total += n;
+            }
+            return new String(buf.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        }
     }
 
     private boolean fileAccessOk() {

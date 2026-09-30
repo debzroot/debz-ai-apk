@@ -120,11 +120,30 @@ public final class RootfsManager {
         if (d.exists()) wipe(ctx);
         d.mkdirs();
         File pkg = new File(d, "rootfs-mini.pkg");
+        // progress copy WAJIB byte-based 0-45%: copy asset 130MB+ tanpa
+        // feedback = bar diem menit-menit, user kira hang (versi lama cuma
+        // lapor "copy:50" sekali di akhir).
+        long assetLen = -1;
+        try (android.content.res.AssetFileDescriptor afd = ctx.getAssets().openFd(asset)) {
+            assetLen = afd.getLength();
+        } catch (Exception ignored) {}
         try (InputStream in = ctx.getAssets().open(asset);
              OutputStream out = new FileOutputStream(pkg)) {
             byte[] buf = new byte[65536];
             int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            long copied = 0;
+            int lastPct = -1;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+                if (assetLen > 0 && cb != null) {
+                    copied += n;
+                    int pct = (int) (copied * 45 / assetLen);
+                    if (pct != lastPct && pct < 45) {
+                        lastPct = pct;
+                        cb.on("copy", pct);
+                    }
+                }
+            }
         }
         if (cb != null) cb.on("copy", 50);
         String[] sum = readSums(ctx);
