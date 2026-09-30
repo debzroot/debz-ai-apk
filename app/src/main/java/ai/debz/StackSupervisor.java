@@ -40,7 +40,11 @@ public final class StackSupervisor {
 
     public static String start(Context ctx, File rootfs,
                                Map<String, String> env) throws Exception {
+        DebzConfig.setStatus(ctx, "firstboot");
+        android.util.Log.i("DebzAI", "boot: firstBoot mulai");
         firstBoot(ctx, rootfs, env);
+        android.util.Log.i("DebzAI", "boot: firstBoot kelar, start stack");
+        DebzConfig.setStatus(ctx, "starting-stack");
         Process p = ProotManager.exec(ctx, rootfs, env, "/opt/debz/start-stack.sh");
         // drain() tanpa timeout = gantung selamanya kalau child macet:
         // tunggu exit dulu (timeout), baru baca sisa output non-blocking.

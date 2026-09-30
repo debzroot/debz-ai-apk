@@ -38,8 +38,10 @@ public class BootstrapService extends Service {
 
     private void bootInner(int offset, android.content.Context ctx) {
         DebzConfig.setStatus(ctx, "booting");
+        android.util.Log.i("DebzAI", "boot mulai offset=" + offset);
         try {
             RootfsManager.selfHeal(ctx);
+            android.util.Log.i("DebzAI", "selfHeal ok, ready=" + RootfsManager.ready(ctx));
             boolean rooted = RootDetector.suWorks();
             DebzConfig.setRootMode(ctx, rooted);
             int web = PortManager.takePreferred(8091 + offset);
@@ -63,10 +65,12 @@ public class BootstrapService extends Service {
             }
             if (RootfsManager.ready(ctx)) {
                 DebzConfig.setStatus(ctx, "starting-stack");
+                android.util.Log.i("DebzAI", "stack start web=" + web + " api=" + api);
                 String out = StackSupervisor.start(ctx, RootfsManager.dir(ctx),
                     StackSupervisor.envFor(web, api, fpm, tools));
                 boolean ok = StackSupervisor.healthyRetry("http://127.0.0.1:" + web + "/", 10);
                 if (!ok) saveStackLog(ctx, out);
+                android.util.Log.i("DebzAI", "stack akhir ok=" + ok);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");
             } else {
                 DebzConfig.setStatus(ctx, "no-rootfs");

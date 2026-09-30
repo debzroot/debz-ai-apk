@@ -21,7 +21,7 @@ public final class RootfsManager {
 
     // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
-    private static final int ROOTFS_EPOCH = 6;
+    private static final int ROOTFS_EPOCH = 7;
 
     public interface Progress {
         void on(String stage, int percent);

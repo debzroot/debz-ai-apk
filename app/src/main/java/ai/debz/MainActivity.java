@@ -258,6 +258,7 @@ public class MainActivity extends Activity {
         switch (stageOf(raw)) {
             case "idle": return "Siap";
             case "booting": return "Menyalakan service\u2026";
+            case "firstboot": return "Install dependensi Python\u2026";
             case "extract-rootfs": return "Menyalin rootfs dari APK\u2026";
             case "download-rootfs": return "Mengunduh rootfs\u2026";
             case "download": return "Mengunduh\u2026";
