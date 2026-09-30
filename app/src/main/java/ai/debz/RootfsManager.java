@@ -60,6 +60,9 @@ public final class RootfsManager {
         if (asset == null) throw new Exception("rootfs tidak dibundle di APK");
         boolean gzipped = asset.endsWith(".gz");
         File d = dir(ctx);
+        // tree tanpa marker = sisa extract gagal -> buang dulu, kalau nggak
+        // file korup (dir nyasar di path link dsb) bikin extract gagal abadi.
+        if (d.exists()) wipe(ctx);
         d.mkdirs();
         File pkg = new File(d, "rootfs-mini.pkg");
         try (InputStream in = ctx.getAssets().open(asset);
@@ -186,11 +189,18 @@ public final class RootfsManager {
         long total = pkg.length();
         long read = 0;
         int lastPct = 60;
+        // link ditunda ke phase 2: GNU tar boleh menaruh hardlink SEBELUM
+        // targetnya (uncompress -> gunzip); one-pass = createLink gagal.
+        java.util.List<TarArchiveEntry> links = new java.util.ArrayList<>();
         InputStream fi = new BufferedInputStream(new FileInputStream(pkg));
         InputStream uncompressed = gzipped ? new GzipCompressorInputStream(fi) : fi;
         try (TarArchiveInputStream tar = new TarArchiveInputStream(uncompressed)) {
             TarArchiveEntry e;
             while ((e = tar.getNextEntry()) != null) {
+                if (e.isSymbolicLink() || e.isLink()) {
+                    links.add(e);
+                    continue;
+                }
                 File f = new File(dest, e.getName());
                 if (!f.getCanonicalPath().startsWith(dest.getCanonicalPath())) {
                     throw new Exception("path traversal: " + e.getName());
@@ -198,25 +208,11 @@ public final class RootfsManager {
                 if (e.isDirectory()) {
                     if (f.exists() && !f.isDirectory()) f.delete();
                     f.mkdirs();
-                } else if (e.isSymbolicLink()) {
-                    f.getParentFile().mkdirs();
-                    try {
-                        java.nio.file.Files.createSymbolicLink(
-                            f.toPath(), java.nio.file.Paths.get(e.getLinkName()));
-                    } catch (java.nio.file.FileAlreadyExistsException ignored) {}
-                } else if (e.isLink()) {
-                    f.getParentFile().mkdirs();
-                    java.nio.file.Path target =
-                        dest.toPath().resolve(e.getLinkName()).normalize();
-                    if (!target.startsWith(dest.toPath())) {
-                        throw new Exception("hardlink traversal: " + e.getName());
-                    }
-                    try {
-                        java.nio.file.Files.createLink(f.toPath(), target);
-                    } catch (java.nio.file.FileAlreadyExistsException
-                            | java.nio.file.NoSuchFileException ignored) {}
                 } else {
                     f.getParentFile().mkdirs();
+                    // dir nyasar di path file (sisa run korup) = gusur juga
+                    if (f.isDirectory()
+                        && !java.nio.file.Files.isSymbolicLink(f.toPath())) deleteRec(f);
                     try (OutputStream o = new FileOutputStream(f)) {
                         byte[] buf = new byte[65536];
                         int n;
@@ -226,11 +222,32 @@ public final class RootfsManager {
                 }
                 read += e.getSize();
                 if (cb != null) {
-                    int pct = 60 + (int) (read * 35 / Math.max(total, 1));
-                    if (pct != lastPct && pct <= 95) {
+                    int pct = 60 + (int) (read * 30 / Math.max(total, 1));
+                    if (pct != lastPct && pct <= 90) {
                         lastPct = pct;
                         cb.on("extract", pct);
                     }
+                }
+            }
+        }
+        // phase 2: symlink + hardlink. Satu link gagal != extract gagal;
+        // kumpulin, lapor di akhir. Sisa run gagal (file/dir di path link
+        // = korup) digusur dulu biar nggak EPERM abadi.
+        java.util.List<String> linkFail = new java.util.ArrayList<>();
+        int done = 0;
+        for (TarArchiveEntry e : links) {
+            try {
+                makeLink(dest, e);
+            } catch (Exception ex) {
+                linkFail.add(e.getName() + ": " + ex.getClass().getSimpleName()
+                    + " " + ex.getMessage());
+            }
+            done++;
+            if (cb != null && !links.isEmpty()) {
+                int pct = 90 + done * 5 / links.size();
+                if (pct != lastPct) {
+                    lastPct = pct;
+                    cb.on("extract", pct);
                 }
             }
         }
@@ -238,6 +255,38 @@ public final class RootfsManager {
         new File(dest, "opt/debz/start-stack.sh").setExecutable(true);
         new File(dest, "opt/debz/stop-stack.sh").setExecutable(true);
         new File(dest, "opt/debz/watchdog.sh").setExecutable(true);
+        // canary: symlink usrmerge (bin/sh) + pasangan pemicu error user
+        // (uncompress->gunzip) wajib ada; kalau nggak berarti tree korup.
+        String[] canary = {"bin/sh", "usr/bin/gunzip", "usr/bin/uncompress",
+            "opt/debz/start-stack.sh"};
+        java.util.List<String> missing = new java.util.ArrayList<>();
+        for (String c : canary) if (!new File(dest, c).exists()) missing.add(c);
+        if (!missing.isEmpty() || !linkFail.isEmpty()) {
+            throw new Exception("extract tak lengkap, hilang=" + missing
+                + " link-gagal=" + linkFail.subList(0, Math.min(3, linkFail.size())));
+        }
+    }
+
+    private static void makeLink(File dest, TarArchiveEntry e) throws Exception {
+        File f = new File(dest, e.getName());
+        if (!f.getCanonicalPath().startsWith(dest.getCanonicalPath())) {
+            throw new Exception("path traversal: " + e.getName());
+        }
+        f.getParentFile().mkdirs();
+        if (java.nio.file.Files.isSymbolicLink(f.toPath())) f.delete();
+        else if (f.isDirectory()) deleteRec(f);
+        else f.delete();
+        if (e.isSymbolicLink()) {
+            java.nio.file.Files.createSymbolicLink(
+                f.toPath(), java.nio.file.Paths.get(e.getLinkName()));
+        } else {
+            java.nio.file.Path target =
+                dest.toPath().resolve(e.getLinkName()).normalize();
+            if (!target.startsWith(dest.toPath())) {
+                throw new Exception("hardlink traversal: " + e.getName());
+            }
+            java.nio.file.Files.createLink(f.toPath(), target);
+        }
     }
 
     // hapus RF lama (dipakai OTA/ganti versi)
@@ -246,6 +295,11 @@ public final class RootfsManager {
     }
 
     private static void deleteRec(File f) {
+        // symlink ke dir jangan di-follow, hapus linknya aja
+        if (java.nio.file.Files.isSymbolicLink(f.toPath())) {
+            f.delete();
+            return;
+        }
         if (f.isDirectory()) {
             File[] kids = f.listFiles();
             if (kids != null) for (File k : kids) deleteRec(k);

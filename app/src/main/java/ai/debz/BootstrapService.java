@@ -58,7 +58,11 @@ public class BootstrapService extends Service {
                 DebzConfig.setStatus(ctx, "no-rootfs");
             }
         } catch (Exception e) {
-            DebzConfig.setStatus(ctx, "error:" + e.getMessage());
+            // class + message biar status kepaca ("FileSystemException: ..."),
+            // stack trace penuh tetap ke logcat buat diagnosa lanjutan.
+            android.util.Log.e("DebzAI", "boot gagal", e);
+            DebzConfig.setStatus(ctx, "error:" + e.getClass().getSimpleName()
+                + ": " + e.getMessage());
         }
     }
 
