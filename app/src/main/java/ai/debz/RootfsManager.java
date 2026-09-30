@@ -251,6 +251,10 @@ public final class RootfsManager {
                 }
             }
         }
+        // repair usrmerge yang dilibas .deb (bin/sbin/lib jadi dir
+        // beneran): gabung isi ke usr/*, pasang ulang symlink. Tanpa ini
+        // /bin/sh + /lib/ld-* nggak ada -> proot gagal start.
+        repairMerges(dest);
         // skrip stack harus executable
         new File(dest, "opt/debz/start-stack.sh").setExecutable(true);
         new File(dest, "opt/debz/stop-stack.sh").setExecutable(true);
@@ -273,19 +277,115 @@ public final class RootfsManager {
             throw new Exception("path traversal: " + e.getName());
         }
         f.getParentFile().mkdirs();
-        if (java.nio.file.Files.isSymbolicLink(f.toPath())) f.delete();
-        else if (f.isDirectory()) deleteRec(f);
-        else f.delete();
+        String pair = mergeTargetFor(e.getName());
+        if (pair != null && f.isDirectory()
+            && !java.nio.file.Files.isSymbolicLink(f.toPath())) {
+            // entry symlink usrmerge (bin->usr/bin) nabrak dir beneran
+            // penuh isi .deb: gabung dulu ke target, baru pasang symlink.
+            mergeTree(f, new File(dest, pair));
+            deleteRec(f);
+        } else if (java.nio.file.Files.isSymbolicLink(f.toPath())) {
+            f.delete();
+        } else if (f.isDirectory()) {
+            deleteRec(f);
+        } else {
+            f.delete();
+        }
         if (e.isSymbolicLink()) {
-            java.nio.file.Files.createSymbolicLink(
-                f.toPath(), java.nio.file.Paths.get(e.getLinkName()));
+            String ln = e.getLinkName();
+            try {
+                java.nio.file.Files.createSymbolicLink(
+                    f.toPath(), java.nio.file.Paths.get(ln));
+            } catch (Exception first) {
+                // symlink diblokir -> salin isi kalau targetnya file biasa
+                File r = f.getParentFile().toPath()
+                    .resolve(ln).normalize().toFile();
+                if (!r.isFile()) throw first;
+                copyFile(r, f);
+            }
         } else {
             java.nio.file.Path target =
                 dest.toPath().resolve(e.getLinkName()).normalize();
             if (!target.startsWith(dest.toPath())) {
                 throw new Exception("hardlink traversal: " + e.getName());
             }
-            java.nio.file.Files.createLink(f.toPath(), target);
+            try {
+                java.nio.file.Files.createLink(f.toPath(), target);
+            } catch (Exception first) {
+                // hardlink diblokir (EACCES di f2fs HP ini) -> salin isi,
+                // setara fungsi buat rootfs (cuma nambah byte).
+                if (!target.toFile().isFile()) throw first;
+                copyFile(target.toFile(), f);
+                if ((e.getMode() & 0100) != 0) f.setExecutable(true);
+            }
+        }
+    }
+
+    // pasangan usrmerge yang dilibas .deb jadi dir beneran (dpkg-deb -x
+    // nimpa symlink bin/lib/sbin): kembalikan ke symlink biar /bin/sh +
+    // ELF interpreter /lib/ld-* jalan di proot. null kalau bukan pasangan.
+    private static String mergeTargetFor(String entryName) {
+        String n = entryName.startsWith("./")
+            ? entryName.substring(2) : entryName;
+        if (n.equals("bin")) return "usr/bin";
+        if (n.equals("sbin")) return "usr/sbin";
+        if (n.equals("lib")) return "usr/lib";
+        if (n.equals("lib64")) return "usr/lib";
+        return null;
+    }
+
+    // sweep pasangan yang bahkan nggak ada entry symlink-nya di tarball
+    // (dir beneran doang): gabung isi ke target, pasang symlink.
+    private static void repairMerges(File dest) throws Exception {
+        String[][] pairs = {{"bin", "usr/bin"}, {"sbin", "usr/sbin"},
+            {"lib", "usr/lib"}, {"lib64", "usr/lib"}};
+        for (String[] p : pairs) {
+            File link = new File(dest, p[0]);
+            File usp = new File(dest, p[1]);
+            if (java.nio.file.Files.isSymbolicLink(link.toPath())) continue;
+            if (!usp.isDirectory()) continue;
+            if (link.isDirectory()
+                && !java.nio.file.Files.isSymbolicLink(link.toPath())) {
+                mergeTree(link, usp);
+                deleteRec(link);
+            } else if (!link.exists()) {
+                // gelap total: bikin symlink-nya sekalian
+            } else {
+                continue;
+            }
+            try {
+                java.nio.file.Files.createSymbolicLink(
+                    link.toPath(), java.nio.file.Paths.get(p[1]));
+            } catch (Exception ignored) {}
+        }
+    }
+
+    // gabung isi src ke dst (deb menang ala dpkg overwrite), src dikosongkan
+    private static void mergeTree(File src, File dst) throws Exception {
+        File[] kids = src.listFiles();
+        if (kids == null) return;
+        for (File c : kids) {
+            File t = new File(dst, c.getName());
+            boolean cDir = c.isDirectory()
+                && !java.nio.file.Files.isSymbolicLink(c.toPath());
+            boolean tDir = t.isDirectory()
+                && !java.nio.file.Files.isSymbolicLink(t.toPath());
+            if (cDir && tDir) {
+                mergeTree(c, t);
+                continue;
+            }
+            if (t.exists()
+                || java.nio.file.Files.isSymbolicLink(t.toPath())) deleteRec(t);
+            java.nio.file.Files.move(c.toPath(), t.toPath());
+        }
+    }
+
+    private static void copyFile(File src, File dst) throws Exception {
+        try (InputStream in = new BufferedInputStream(new FileInputStream(src));
+             OutputStream o = new FileOutputStream(dst)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
         }
     }
 
