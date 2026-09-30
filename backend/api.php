@@ -585,6 +585,11 @@ if(isset($_GET['action'])&& $_GET['action']=== 'run_status') {
     $baseApiS = preg_replace('#/chat/completions$#','',$baseEndpointS);
     if($baseApiS === $baseEndpointS)$baseApiS = preg_replace('#/responses$#','',$baseEndpointS);
     $baseApiS = rtrim($baseApiS,'/');
+    if(! providers_need_curl()) {
+        http_response_code(502);
+        echo json_encode(['error' => 'php-curl tidak aktif di HP (rootfs lama) — update APK']);
+        exit;
+    }
     $chs = curl_init($baseApiS.'/runs/'.rawurlencode($rid));
     curl_setopt($chs,CURLOPT_RETURNTRANSFER,true);
     curl_setopt($chs,CURLOPT_HTTPHEADER,['Authorization: Bearer '.$apiKey]);
@@ -624,6 +629,11 @@ if(isset($_GET['action'])&& $_GET['action']=== 'approval') {
     $baseApi0 = preg_replace('#/chat/completions$#','',$baseEndpoint0);
     if($baseApi0 === $baseEndpoint0)$baseApi0 = preg_replace('#/responses$#','',$baseEndpoint0);
     $baseApi0 = rtrim($baseApi0,'/');
+    if(! providers_need_curl()) {
+        http_response_code(502);
+        echo json_encode(['error' => 'php-curl tidak aktif di HP (rootfs lama) — update APK']);
+        exit;
+    }
     $ch0 = curl_init($baseApi0.'/runs/'.rawurlencode($approvalRunId).'/approval');
     curl_setopt($ch0,CURLOPT_RETURNTRANSFER,true);
     curl_setopt($ch0,CURLOPT_HTTPHEADER,['Authorization: Bearer '.$apiKey,'Content-Type: application/json']);
@@ -924,6 +934,12 @@ if($lastUserText !== '') {
 if(! $hasImages && $userMessage !== '') {
     $runsPayload = ['input' => $userMessage,'conversation_history' => $conversation_history,];
     if($instructions !== '')$runsPayload['instructions']= $instructions;
+    if(! providers_need_curl()) {
+        if(! headers_sent())header('Content-Type: text/event-stream; charset=utf-8');
+        emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Gateway lama butuh php-curl** yang tidak aktif di HP (rootfs lama). Update APK atau pakai provider mode opencode-cli.\n"]]]]);
+        emitDone();
+        exit;
+    }
     $ch = curl_init($baseApi.'/runs');
     curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
     curl_setopt($ch,CURLOPT_HTTPHEADER,['Authorization: Bearer '.$apiKey,'Content-Type: application/json']);

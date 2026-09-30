@@ -21,8 +21,8 @@ public final class RootfsManager {
 
     // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
-    // 14 = binary curl ikut bundle + card fallback run.
-    private static final int ROOTFS_EPOCH = 14;
+    // 15 = guard curl semua endpoint legacy + fileinfo + symlink php.
+    private static final int ROOTFS_EPOCH = 15;
 
     public interface Progress {
         void on(String stage, int percent);

@@ -37,7 +37,7 @@ for f in "$DEBS"/*.deb; do dpkg-deb -x "$f" "$ROOTFS"; done
 echo ">> [3b/7] aktifkan ekstensi PHP (postinst deb tak jalan via dpkg-deb -x)"
 # Tanpa ini curl/mbstring/sqlite3 ada .so-nya tapi tak pernah diload ->
 # curl_init() fatal -> save provider 500 kosong di HP.
-for m in curl mbstring sqlite3; do
+for m in curl mbstring sqlite3 fileinfo; do
   echo "extension=$m.so" > "$ROOTFS/etc/php/8.3/mods-available/$m.ini"
 done
 mkdir -p "$ROOTFS/etc/php/8.3/cli/conf.d" "$ROOTFS/etc/php/8.3/fpm/conf.d"
@@ -45,7 +45,10 @@ for sapi in cli fpm; do
   ln -sf "../../mods-available/curl.ini" "$ROOTFS/etc/php/8.3/$sapi/conf.d/20-curl.ini"
   ln -sf "../../mods-available/mbstring.ini" "$ROOTFS/etc/php/8.3/$sapi/conf.d/20-mbstring.ini"
   ln -sf "../../mods-available/sqlite3.ini" "$ROOTFS/etc/php/8.3/$sapi/conf.d/20-sqlite3.ini"
+  ln -sf "../../mods-available/fileinfo.ini" "$ROOTFS/etc/php/8.3/$sapi/conf.d/20-fileinfo.ini"
 done
+# skrip/AI kadang manggil `php` generik (cuma php8.3 yg ada) — symlink biar ga ENOENT
+ln -sf php8.3 "$ROOTFS/usr/bin/php"
 ls "$ROOTFS/etc/php/8.3/fpm/conf.d/"
 
 echo ">> [4/7] opencode $OPENCODE_VER (arm64)"
