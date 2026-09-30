@@ -20,6 +20,9 @@ import sys
 import shutil
 NODE = shutil.which("node") or "/usr/bin/node"
 WRAPPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pw_browser.mjs")
+# fallback tanpa node/playwright (mis. APK Android): CDP stdlib-only ke
+# Chrome/WebView yang sudah ada di device. CLI-nya kompatibel.
+CDP_CLI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cdp_chrome.py")
 
 
 def main() -> int:
@@ -33,9 +36,13 @@ def main() -> int:
 
     cmd = sys.argv[1]
     args = sys.argv[2:]
+    runner = [NODE, WRAPPER]
+    if not (os.path.isfile(WRAPPER) and os.path.isfile(NODE)
+            and os.access(NODE, os.X_OK)):
+        runner = [sys.executable, CDP_CLI]
     try:
         proc = subprocess.run(
-            [NODE, WRAPPER, cmd, *args],
+            [*runner, cmd, *args],
             capture_output=True,
             text=True,
             timeout=120,

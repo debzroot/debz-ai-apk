@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
     private LinearLayout splash;
     private ProgressBar splashBar;
     private TextView splashStage;
+    private WebView autoWeb;
     private Button permBtn;
     private Handler poll;
     private boolean webLoaded;
@@ -152,6 +153,17 @@ public class MainActivity extends Activity {
         web.setVisibility(View.GONE);
         root.addView(web, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        // WebView otomasi 1px buat CUA/browser via CDP (cdp_chrome.py):
+        // debugging aktif -> socket webview_devtools_remote_<pid>, bisa
+        // diakses python proot (uid sama) tanpa root/Chrome eksternal.
+        WebView.setWebContentsDebuggingEnabled(true);
+        autoWeb = new WebView(this);
+        autoWeb.getSettings().setJavaScriptEnabled(true);
+        autoWeb.getSettings().setDomStorageEnabled(true);
+        autoWeb.setWebViewClient(new WebViewClient() {
+        });
+        root.addView(autoWeb, new LinearLayout.LayoutParams(dp(1), dp(1)));
+        autoWeb.loadData("<html><body>debz-auto</body></html>", "text/html", "utf-8");
         setContentView(root);
 
         if (!fileAccessOk() && Build.VERSION.SDK_INT < Build.VERSION_CODES.R

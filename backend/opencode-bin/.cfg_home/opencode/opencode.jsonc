@@ -3,6 +3,13 @@
   "permission": {
     "bash": { "**": "ask" },
     "edit": { "**": "ask" }
+  },
+  "mcp": {
+    "debz": {
+      "type": "local",
+      "command": ["python3", "/opt/debz/app/debz_tools_mcp.py"],
+      "enabled": true
+    }
   }
 }
 // Debz AI — config opencode TERISOLASI.
