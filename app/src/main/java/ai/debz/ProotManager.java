@@ -1,11 +1,15 @@
 package ai.debz;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
 import android.os.Build;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +60,12 @@ public final class ProotManager {
         a.add("-b"); a.add("/sys:/sys");
         // /dev/null wajib ada (redirect shell + nginx emerg tanpa ini)
         a.add("-b"); a.add("/dev:/dev");
+        // localhost di dalam proot: rootfs ubuntu-base minim, /etc/hosts
+        // belum tentu ada -> bind dari Android biar "localhost" resolve.
+        File sysHosts = new File("/system/etc/hosts");
+        if (sysHosts.isFile()) {
+            a.add("-b"); a.add("/system/etc/hosts:/etc/hosts");
+        }
         File sd = new File("/sdcard");
         if (sd.exists()) {
             a.add("-b"); a.add("/sdcard:/mnt/sdcard");
@@ -63,9 +73,57 @@ public final class ProotManager {
         return a;
     }
 
+    // DNS DI DALAM PROOT MATI kalau file ini tidak ada: Android tidak pakai
+    // /etc/resolv.conf (DNS lewat netd), sedangkan glibc di rootfs cuma baca
+    // file itu. Akibat: getaddrinfo gagal semua -> CLI/preflight/proxy
+    // bisu ("Temporary failure in name resolution"). Tulis tiap exec dari
+    // DNS beneran device (LinkProperties), fallback publik.
+    public static void ensureResolvConf(Context ctx, File rootfs) {
+        try {
+            File f = new File(rootfs, "etc/resolv.conf");
+            File parent = f.getParentFile();
+            if (parent != null) parent.mkdirs();
+            StringBuilder sb = new StringBuilder();
+            for (String dns : deviceDns(ctx)) {
+                sb.append("nameserver ").append(dns).append('\n');
+            }
+            sb.append("options timeout:2 attempts:2\n");
+            try (OutputStream o = new FileOutputStream(f, false)) {
+                o.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "resolv.conf gagal: " + e);
+        }
+    }
+
+    private static List<String> deviceDns(Context ctx) {
+        List<String> out = new ArrayList<>();
+        try {
+            ConnectivityManager cm = (ConnectivityManager)
+                ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                for (Network n : cm.getAllNetworks()) {
+                    LinkProperties lp = cm.getLinkProperties(n);
+                    if (lp == null) continue;
+                    for (InetAddress a : lp.getDnsServers()) {
+                        String ip = a.getHostAddress();
+                        if (ip != null && !ip.isEmpty() && !out.contains(ip)) out.add(ip);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        if (out.isEmpty()) {
+            out.add("8.8.8.8");
+            out.add("1.1.1.1");
+        }
+        return out;
+    }
+
     public static Process exec(Context ctx, File rootfs,
                                Map<String, String> env, String... cmd) throws Exception {
         if (env == null) env = StackSupervisor.baseEnv();
+        // DNS dulu, sebelum proot jalan: tanpa ini semua hostname gagal.
+        ensureResolvConf(ctx, rootfs);
         List<String> a = baseArgs(ctx, rootfs);
         a.add("/bin/sh");
         a.add("-c");
