@@ -21,8 +21,8 @@ public final class RootfsManager {
 
     // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
-    // 12 = session per-device auto + OTA notif update.
-    private static final int ROOTFS_EPOCH = 12;
+    // 13 = php-curl/mbstring/sqlite3 aktif + save anti-fatal + empty-retry.
+    private static final int ROOTFS_EPOCH = 13;
 
     public interface Progress {
         void on(String stage, int percent);

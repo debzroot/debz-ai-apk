@@ -100,9 +100,15 @@ function providers_mask($data) {
     }
     return $out;
 }
+function providers_need_curl() {
+    return function_exists('curl_init');
+}
 function providers_fetch_models($baseUrl,$apiKey,$ua = '') {
     $baseUrl = trim((string)$baseUrl);
     if(! preg_match('#^https?://#i',$baseUrl))return['error' => 'base_url invalid','models' =>[]];
+    // HP (rootfs-min): ekstensi curl bisa nonaktif -> fatal 500 kosong kalau
+    // dipaksa. Gagal jujur biar save provider tetap sukses tanpa auto-fetch.
+    if(! providers_need_curl())return['error' => 'php-curl tidak aktif di HP (rootfs lama) — update APK biar auto-fetch jalan','models' =>[]];
     $headers = ['Authorization: Bearer '.(string)$apiKey];
     $isOR = stripos($baseUrl,'openrouter.ai')!== false;
     if($ua === '' && $isOR)$ua = 'opencode/1.0 (linux; x64)';

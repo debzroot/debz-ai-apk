@@ -202,8 +202,12 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
                 $tm = ($tp && ! empty($tp['models'])&& is_array($tp['models']))? array_slice(array_values($tp['models']),0,500): [($tp['model']?? 'muse-spark-1.3-contributor-free')];
                 echo json_encode(['success' => true,'http' => 200,'models' => $tm,'direct' => 'zen-cli']);
                 exit;
-            }$tUa = trim((string)($in['ua']?? ''));
+            }            $tUa = trim((string)($in['ua']?? ''));
             if($tUa === '' && stripos($tUrl,'openrouter.ai')!== false)$tUa = 'opencode/1.0 (linux; x64)';
+            if(! providers_need_curl()) {
+                echo json_encode(['success' => false,'http' => 0,'models' => [],'error' => 'php-curl tidak aktif di HP (rootfs lama) — update APK']);
+                exit;
+            }
             $tHeaders = ['Authorization: Bearer '.$tKey];
             if($tUa !== '')$tHeaders[]= 'User-Agent: '.$tUa;
             $cht = curl_init(rtrim($tUrl,'/').'/models');
@@ -279,6 +283,10 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             $foundSid = '';
             $gSource = '';
             $gErr = '';
+            if(! providers_need_curl()) {
+                echo json_encode(['success' => true,'session_id' => providers_new_sid(),'source' => 'generated','error' => '-']);
+                exit;
+            }
             $curlM = curl_init(rtrim($gUrl,'/').'/models');
             curl_setopt_array($curlM,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $gHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HEADER => true,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
             $rawM = curl_exec($curlM);
@@ -352,6 +360,10 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             $maxTok = 0;
             $supportedParams = null;
             $isOpenRouter = stripos($spUrl,'openrouter.ai')!== false;
+            if(! providers_need_curl()) {
+                echo json_encode(['success' => true,'is_reasoning' => false,'is_openrouter' => $isOpenRouter,'max_tokens' => 8192,'extra' => ['temperature' => 0.7],'extra_json' => '{"temperature":0.7}','supported_params' => null,'notes' => ['tanpa probe: php-curl tidak aktif di HP (rootfs lama)']]);
+                exit;
+            }
             $curlM = curl_init(rtrim($spUrl,'/').'/models');
             curl_setopt_array($curlM,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $spHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
             $rawM = curl_exec($curlM);

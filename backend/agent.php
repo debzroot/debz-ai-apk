@@ -869,6 +869,9 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
 }
 function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array $messages,array $tools,int $maxTokens,array $opts = []): array {
     $tReq0 = microtime(true);
+    if(! function_exists('curl_init')) {
+        return['content' => '','reasoning' => '','reasoningDetails' =>[],'toolCalls' =>[],'usage' => null,'finish_reason' => '','error' => 'PHP curl ext tidak aktif di HP (rootfs lama) — update APK atau pakai mode opencode-cli','http_code' => 0];
+    }
     $url = rtrim($baseUrl,'/').'/chat/completions';
     $payload = ['model' => $model,'messages' => $messages,'stream' => true,'stream_options' =>['include_usage' => true],'stop' =>["</| DSML | invoke>","EOF","</| DSML | tool_calls>","[DONE]"]];
     if(! empty($tools))$payload['tools']= $tools;
@@ -1802,7 +1805,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Pesan kosong** — tidak ada yang bisa diproses.\n"]]]]);
         if(function_exists('emitDone'))emitDone();
         return;
-    }$maxProxyTry = 1;
+    }$maxProxyTry = 2; // 1x direct + 1x cadangan khusus empty-retry (failover proxy mati total)
     $cliBaseEnv = getenv();
     $cliProxy = '';
     $cliProxyEnv = [];
@@ -1812,6 +1815,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     $usageTotal = 0;
     $stepInMax = 0;
     $proxyTryErr = '';
+    $emptyRetry = 0;
     for($proxyTry = 0;
     $proxyTry < $maxProxyTry;
     $proxyTry ++) {
@@ -2206,6 +2210,16 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if(! $sawContent && ! $cliTimedOut) {
             $err = trim($stderrBuf);
             $exitTxt = $exitCode === - 1? 'signal':('exit '.$exitCode);
+            // TRANSIENT first-boot: CLI kadang exit 0 tanpa satu byte pun
+            // (engine dingin). Retry sekali otomatis sebelum nyerah.
+            if($err === '' && $exitCode === 0 && $emptyRetry < 1) {
+                $emptyRetry ++;
+                if(function_exists('termEmit'))termEmit('retry','Respon kosong (engine dingin?) — coba sekali lagi otomatis...');
+                if(function_exists('applog'))applog('OPENCODE_CLI','empty_retry',['try' => $proxyTry + 1]);
+                if(function_exists('native_sleep_heartbeat'))native_sleep_heartbeat(2000);
+                else usleep(2000000);
+                continue;
+            }
             $msg = "\n\n⚠️ **Stream kosong** — opencode CLI tidak menghasilkan teks (".$exitTxt.").\n";
             if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => $msg]]]]);
