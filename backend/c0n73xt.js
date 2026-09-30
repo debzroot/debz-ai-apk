@@ -528,6 +528,23 @@
         showToast('Chat exported!');
     }
 
+    // info device dari APK (mode root, port web/api/tools): cuma ada
+    // bila dibuka di dalam APK. Di browser biasa elemen dibuang.
+    var deviceEl = document.getElementById('sidebar-device');
+    if (deviceEl) {
+        if (window.DebzAndroid && window.DebzAndroid.getInfo) {
+            try {
+                var info = JSON.parse(window.DebzAndroid.getInfo());
+                deviceEl.textContent = (info.root ? 'mode root' : 'mode non-root')
+                    + ' · web ' + info.web + ' · api ' + info.api + ' · tools ' + info.tools;
+                deviceEl.hidden = false;
+            } catch (e) {
+                deviceEl.remove();
+            }
+        } else {
+            deviceEl.remove();
+        }
+    }
     if (exportBtn) exportBtn.addEventListener('click', exportChat);
     // tombol Terminal HP: cuma nongol di dalam APK (JS bridge native).
     // di browser biasa tetap hidden biar ga ada tombol mati.

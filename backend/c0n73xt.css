@@ -1752,6 +1752,15 @@ html, body {
     word-break: break-word;
 }
 .sidebar-status b { color: var(--green); }
+.sidebar-device {
+    margin-top: 6px;
+    padding: 6px 10px;
+    font-size: 10px;
+    color: var(--txt-dim);
+    line-height: 1.5;
+    word-break: break-word;
+    opacity: .85;
+}
 
 /* ==================== PROVIDER POP ==================== */
 

@@ -3,7 +3,6 @@ package ai.debz;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,7 +18,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.JavascriptInterface;
-import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -30,15 +28,10 @@ public class MainActivity extends Activity {
     private static final long POLL_MS = 2000;
 
     private WebView web;
-    private TextView dot;
-    private TextView statusLine;
-    private TextView infoLine;
-    private ProgressBar bar;
     private LinearLayout splash;
     private ProgressBar splashBar;
     private TextView splashStage;
     private WebView autoWeb;
-    private Button permBtn;
     private Handler poll;
     private boolean webLoaded;
 
@@ -56,31 +49,8 @@ public class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(12);
-        root.setPadding(pad, pad, pad, pad);
 
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        TextView title = new TextView(this);
-        title.setText("Debz AI " + OtaManager.currentVersion());
-        title.setTextSize(18);
-        title.setLayoutParams(new LinearLayout.LayoutParams(0,
-            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        dot = new TextView(this);
-        dot.setText("\u25CF");
-        dot.setTextSize(20);
-        head.addView(title);
-        head.addView(dot);
-
-        statusLine = new TextView(this);
-        statusLine.setTextSize(14);
-
-        bar = new ProgressBar(this, null,
-            android.R.attr.progressBarStyleHorizontal);
-        bar.setMax(100);
-        bar.setVisibility(View.GONE);
-
-        // splash: tampil selama stack naik, web disembunyikan sampai up.
+        // splash minimalis: progress loading doang, tanpa tombol apapun.
         // 100% = langsung buka chat, tanpa tap reload manual.
         splash = new LinearLayout(this);
         splash.setOrientation(LinearLayout.VERTICAL);
@@ -105,27 +75,6 @@ public class MainActivity extends Activity {
         splash.addView(splashStage);
         splash.addView(splashBar);
 
-        infoLine = new TextView(this);
-        infoLine.setTextSize(12);
-
-        permBtn = new Button(this);
-        permBtn.setText("Izinkan akses file");
-        permBtn.setOnClickListener(v -> askFileAccess());
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        Button reloadBtn = new Button(this);
-        reloadBtn.setText("Reload");
-        reloadBtn.setOnClickListener(v -> loadBackend());
-        Button restartBtn = new Button(this);
-        restartBtn.setText("Restart");
-        restartBtn.setOnClickListener(v -> restartStack());
-        for (Button b : new Button[]{reloadBtn, restartBtn}) {
-            b.setLayoutParams(new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            row.addView(b);
-        }
-
         web = new WebView(this);
         web.addJavascriptInterface(new AndroidBridge(), "DebzAndroid");
         WebSettings ws = web.getSettings();
@@ -142,12 +91,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        root.addView(head);
-        root.addView(statusLine);
-        root.addView(bar);
-        root.addView(infoLine);
-        root.addView(permBtn);
-        root.addView(row);
         root.addView(splash, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         web.setVisibility(View.GONE);
@@ -166,8 +109,10 @@ public class MainActivity extends Activity {
         autoWeb.loadData("<html><body>debz-auto</body></html>", "text/html", "utf-8");
         setContentView(root);
 
-        if (!fileAccessOk() && Build.VERSION.SDK_INT < Build.VERSION_CODES.R
-                && !DebzConfig.permAsked(this)) {
+        // izin storage diminta sekali via alur sistem (dialog/settings),
+        // tanpa tombol di splash. Stack tetap naik walau ditolak (sdcard
+        // optional, cuma buat bind /mnt/sdcard).
+        if (!fileAccessOk() && !DebzConfig.permAsked(this)) {
             DebzConfig.setPermAsked(this);
             askFileAccess();
         }
@@ -200,8 +145,6 @@ public class MainActivity extends Activity {
         String raw = DebzConfig.status(this);
         int pct = progressOf(raw);
         boolean up = "up".equals(raw);
-        statusLine.setText(humanize(raw));
-        dot.setTextColor(colorFor(raw));
         splashStage.setText(humanize(raw));
         if (pct >= 0) {
             splashBar.setProgress(pct);
@@ -213,26 +156,33 @@ public class MainActivity extends Activity {
         } else if (!up && web.getVisibility() == View.VISIBLE) {
             web.setVisibility(View.GONE);
         }
-        int webPort = DebzConfig.webPort(this);
-        if (webPort <= 0) webPort = 8091 + DebzConfig.portOffset(this);
-        int apiPort = DebzConfig.apiPort(this);
-        if (apiPort <= 0) apiPort = 8092 + DebzConfig.portOffset(this);
-        infoLine.setText("web :" + webPort + "  api :" + apiPort
-            + "  mode :" + (DebzConfig.rootMode(this) ? "root" : "non-root")
-            + "\nakses file :" + (fileAccessOk() ? "OK (/mnt/sdcard aktif)" : "belum"));
-        permBtn.setVisibility(fileAccessOk() ? View.GONE : View.VISIBLE);
         if ("up".equals(raw) && !webLoaded) {
             webLoaded = true;
             loadBackend();
         }
     }
 
-    // dipanggil dari sidebar web (JS): buka terminal native.
+    // dipanggil dari sidebar web (JS): buka terminal native + info device.
     private class AndroidBridge {
         @JavascriptInterface
         public void openTerminal() {
             runOnUiThread(() ->
                 startActivity(new Intent(MainActivity.this, TerminalActivity.class)));
+        }
+
+        @JavascriptInterface
+        public String getInfo() {
+            int off = DebzConfig.portOffset(MainActivity.this);
+            int webPort = DebzConfig.webPort(MainActivity.this);
+            if (webPort <= 0) webPort = 8091 + off;
+            int apiPort = DebzConfig.apiPort(MainActivity.this);
+            if (apiPort <= 0) apiPort = 8092 + off;
+            int toolsPort = DebzConfig.toolsPort(MainActivity.this);
+            if (toolsPort <= 0) toolsPort = 9191 + off;
+            return "{\"v\":\"" + OtaManager.currentVersion() + "\""
+                + ",\"root\":" + DebzConfig.rootMode(MainActivity.this)
+                + ",\"web\":" + webPort + ",\"api\":" + apiPort
+                + ",\"tools\":" + toolsPort + "}";
         }
     }
 
@@ -240,34 +190,6 @@ public class MainActivity extends Activity {
         int port = DebzConfig.webPort(this);
         if (port <= 0) port = 8091 + DebzConfig.portOffset(this);
         web.loadUrl("http://127.0.0.1:" + port + "/");
-    }
-
-    private void restartStack() {
-        new Thread(() -> {
-            try {
-                if (!RootfsManager.ready(this)) {
-                    toast("rootfs belum siap");
-                    return;
-                }
-                int webPort = DebzConfig.webPort(this);
-                if (webPort <= 0) webPort = 8091 + DebzConfig.portOffset(this);
-                int apiPort = DebzConfig.apiPort(this);
-                if (apiPort <= 0) apiPort = 8092 + DebzConfig.portOffset(this);
-                int fpm = 9000 + DebzConfig.portOffset(this);
-                int tools = DebzConfig.toolsPort(this);
-                if (tools <= 0) tools = 9191 + DebzConfig.portOffset(this);
-                StackSupervisor.stop(this, RootfsManager.dir(this));
-                StackSupervisor.start(this, RootfsManager.dir(this),
-                    StackSupervisor.envFor(webPort, apiPort, fpm, tools));
-                toast("stack direstart");
-            } catch (Exception e) {
-                toast("restart gagal: " + e.getMessage());
-            }
-            runOnUiThread(() -> {
-                webLoaded = false;
-                updateStatus();
-            });
-        }).start();
     }
 
     private boolean fileAccessOk() {
@@ -358,21 +280,12 @@ public class MainActivity extends Activity {
             case "booting":
                 return "Stack lagi naik, tunggu sebentar lalu tap Reload.";
             case "stack-fail":
-                return "Tap Restart di atas, kalau masih gagal cek Terminal.";
+                return "Tutup dan buka ulang app untuk coba lagi, kalau masih gagal buka Terminal di sidebar.";
             case "no-rootfs":
                 return "APK tidak membawa rootfs. Install ulang dari artifact debz-ai-apk yang benar.";
             default:
                 if (raw.startsWith("error:")) return "Catat pesannya, kirim ke developer.";
-                return "Tunggu BootstrapService selesai, lalu tap Reload.";
+                return "Tunggu BootstrapService selesai.";
         }
-    }
-
-    private static int colorFor(String raw) {
-        String s = stageOf(raw);
-        if ("up".equals(s)) return Color.GREEN;
-        if ("stack-fail".equals(s) || "no-rootfs".equals(s)
-                || "error".equals(s)) return Color.RED;
-        if ("idle".equals(s)) return Color.GRAY;
-        return Color.YELLOW;
     }
 }

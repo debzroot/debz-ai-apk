@@ -231,6 +231,7 @@ function get_file_version ($path )
                 <a href="?logout=1" class="st-btn logout-btn" title="Keluar / Logout"><span class="st-ico">🚪</span><span class="st-lbl">Keluar</span></a>
             </div>
             <div class="sidebar-status" id="sidebar-status">Debz AI · Siap ✨</div>
+            <div class="sidebar-device" id="sidebar-device" hidden></div>
         </div>
         <div class="sidebar-footer">
             <span class="sidebar-count" id="session-count">0 sessions</span>
