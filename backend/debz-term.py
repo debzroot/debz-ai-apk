@@ -1258,7 +1258,7 @@ def _proxy_watch_webui_rotate():
             if cur and cur != last_sticky:
                 last_sticky = cur
                 if cur == "__DIRECT__":
-                    _proxy_note("⛔ request terakhir: DIRECT (tanpa proxy)", color="yellow")
+                    _proxy_note("⛔ request terakhir: koneksi langsung", color="yellow")
                 else:
                     _proxy_note(f"🌐 proxy aktif: {cur}", color="green")
         except Exception:
@@ -4239,7 +4239,8 @@ class Agent:
                     stalls += 1
                     self._oc_session = ""
                     if attempt < 3:
-                        _msg_proxy(f"coba ke proxy baru ({attempt + 1}/4, budget dikecilin)…", icon="🔄", color="yellow")
+                        _px = getattr(self, '_cur_proxy', '') or ''
+                        _msg_proxy(f"coba lagi ({attempt + 1}/4{', ganti proxy' if _px else ''})…", icon="🔄", color="yellow")
                         continue
                     return f"⚠️ opencode CLI: {et}"
 
@@ -4259,7 +4260,7 @@ class Agent:
                         break
                     bad = any(k in _etl for k in ("timeout", "terputus", "curl error", "proxy", "hang", "rate limit", "http 5", "429", "connection", "reset", "socket", "refused"))
                     if attempt < 3 and bad:
-                        _msg("[dim yellow]🔄 Proxy/network error · failover ke run berikutnya…[/dim yellow]")
+                        _msg("[dim yellow]🔄 Network error · coba run berikutnya…[/dim yellow]")
                         self._proxy_fail_next = True
                         continue
                     break

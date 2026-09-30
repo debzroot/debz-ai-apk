@@ -796,7 +796,7 @@ function debz_net_preflight(string $baseUrl) {
     $fp = @fsockopen($host, $port, $sec, $sem, 4);
     $dt = round((microtime(true) - $t0) * 1000);
     if(!is_resource($fp)) {
-        $err = "HP tidak bisa menjangkau $host:$port langsung ($sem, {$dt}ms). Chat butuh internet ke provider ini — cek koneksi, atau pasang proxy di pengaturan.";
+        $err = "HP tidak bisa menjangkau $host:$port langsung ($sem, {$dt}ms). Chat butuh internet ke provider ini — cek koneksi HP (data/WiFi) lalu coba lagi.";
         $cache[$host] = $err;
         return $err;
     }
@@ -825,7 +825,7 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
         }
         $r = native_chat_once_raw($baseUrl,$apiKey,$model,$sendMsgs,$tools,$maxTokens,$opts);
         if($r['error']=== '' && $r['content']=== '' && empty($r['toolCalls'])&& $r['reasoning']=== '') {
-            $r['error']= 'Blackhole proxy: stream selesai tapi 0 tokens diterima';
+            $r['error']= 'Blackhole: stream selesai tapi 0 tokens diterima';
             if(($r['dl']?? 1)<= 0)$r['pre_data']= true;
         }
         if($r['error']!== '' && ! $stripRD && native_has_rd($messages)&& stripos($r['error'],'HTTP 400')!== false && $r['content']=== '' && $r['reasoning']=== '') {
@@ -842,9 +842,9 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
             return $r;
         }
         $errTxt = (string)$r['error'];
-        $isTransient = (stripos($errTxt,'cURL error')=== 0 || preg_match('/\bHTTP\s+5\d\d\b/i',$errTxt)|| stripos($errTxt,'HTTP 408')!== false || stripos($errTxt,'HTTP 429')!== false || stripos($errTxt,'timeout')!== false || stripos($errTxt,'timed out')!== false || stripos($errTxt,'temporar')!== false || stripos($errTxt,'Blackhole proxy')!== false);
+        $isTransient = (stripos($errTxt,'cURL error')=== 0 || preg_match('/\bHTTP\s+5\d\d\b/i',$errTxt)|| stripos($errTxt,'HTTP 408')!== false || stripos($errTxt,'HTTP 429')!== false || stripos($errTxt,'timeout')!== false || stripos($errTxt,'timed out')!== false || stripos($errTxt,'temporar')!== false || stripos($errTxt,'Blackhole: stream')!== false);
         $is5xxViaProxy = preg_match('/\bHTTP\s+5\d\d\b/i',$errTxt)=== 1 && ! empty($GLOBALS['_debz_last_proxy']);
-        $isProxyError = stripos($errTxt,'cURL error')=== 0 || stripos($errTxt,'timeout')!== false || stripos($errTxt,'timed out')!== false || stripos($errTxt,'HTTP 407')!== false || stripos($errTxt,'Failed to connect')!== false || stripos($errTxt,'Could not connect')!== false || stripos($errTxt,'Proxy CONNECT aborted')!== false || stripos($errTxt,'empty reply from server')!== false || stripos($errTxt,'Connection reset')!== false || stripos($errTxt,'Connection refused')!== false || stripos($errTxt,'Network is unreachable')!== false || stripos($errTxt,'Broken pipe')!== false || stripos($errTxt,'unexpected eof')!== false || stripos($errTxt,'Blackhole proxy')!== false || ! empty($is5xxViaProxy);
+        $isProxyError = stripos($errTxt,'cURL error')=== 0 || stripos($errTxt,'timeout')!== false || stripos($errTxt,'timed out')!== false || stripos($errTxt,'HTTP 407')!== false || stripos($errTxt,'Failed to connect')!== false || stripos($errTxt,'Could not connect')!== false || stripos($errTxt,'Proxy CONNECT aborted')!== false || stripos($errTxt,'empty reply from server')!== false || stripos($errTxt,'Connection reset')!== false || stripos($errTxt,'Connection refused')!== false || stripos($errTxt,'Network is unreachable')!== false || stripos($errTxt,'Broken pipe')!== false || stripos($errTxt,'unexpected eof')!== false || stripos($errTxt,'Blackhole: stream')!== false || ! empty($is5xxViaProxy);
         $isSSLError = (stripos($errTxt,'cURL error')=== 0)&&(stripos($errTxt,'SSL')!== false || stripos($errTxt,'ssl')!== false || stripos($errTxt,'certificate')!== false || stripos($errTxt,'handshake')!== false)&& stripos($errTxt,'unexpected eof')=== false;
         $isRateLimit = stripos($errTxt,'HTTP 429')!== false;
         $isStall = ! empty($r['stall']);
@@ -885,9 +885,10 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
             if($resumeOn) {
                 $keptContent = native_trunc($keptContent.(string)$r['content'],4000);
                 $keptReasoning = native_trunc($keptReasoning.(string)$r['reasoning'],4000);
-                termEmit('retry',"✂️ Stream terputus. Simpan partial (".strlen($keptContent)." chars), putar proxy + lanjutkan...");
+                $pxOn = ! empty($GLOBALS['_debz_last_proxy']);
+                termEmit('retry',"✂️ Stream terputus. Simpan partial (".strlen($keptContent)." chars), ".($pxOn? "putar proxy + lanjutkan...": "sambung lagi otomatis..."));
             }else {
-                termEmit('retry',"✂️ Stream terputus. Membuang partial data dan putar proxy...");
+                termEmit('retry',"✂️ Stream terputus. ".( ! empty($GLOBALS['_debz_last_proxy'])? "Membuang partial data dan putar proxy...": "Coba lagi dari awal..."));
             }
             $r['content']= '';
             $r['reasoning']= '';
@@ -1063,7 +1064,7 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
         }
         return strlen($chunk);
     };
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 150,CURLOPT_LOW_SPEED_LIMIT => 10,CURLOPT_LOW_SPEED_TIME => 20,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write]);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 150,CURLOPT_LOW_SPEED_LIMIT => 10,CURLOPT_LOW_SPEED_TIME => 20,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write]);
     if(! empty($opts['_sslFallback'])) {
         if(function_exists('termEmit'))termEmit('info',"🔒 SSL verify disabled (fallback mode)");
     }$px = '';
@@ -1915,7 +1916,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             }
             if(empty($GLOBALS['_debz_direct_noticed'])) {
                 $GLOBALS['_debz_direct_noticed'] = true;
-                if(function_exists('termEmit'))termEmit('info','ℹ️ Mode direct (tanpa proxy) ke '.((string)($P['base_url']?? 'provider')));
+                if(function_exists('applog'))applog('CLI','direct_mode',['base' => (string)($P['base_url']?? '')]);
             }
         }
         $env = $cliBaseEnv;
@@ -2189,7 +2190,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 break;
             }
             if(time()> $cliDeadline ||(time()- $t0)> $hardCap) {
-                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Timeout CLI** — proses molor tanpa progres cukup, dihentikan (kill + reborn kalau via proxy).\n"]]]]);
+                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Timeout CLI** — proses molor tanpa progres cukup, dihentikan.\n"]]]]);
                 @ proc_terminate($proc,9);
                 $cliTimedOut = true;
                 break;

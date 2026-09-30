@@ -199,7 +199,7 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             $tHeaders = ['Authorization: Bearer '.$tKey];
             if($tUa !== '')$tHeaders[]= 'User-Agent: '.$tUa;
             $cht = curl_init(rtrim($tUrl,'/').'/models');
-            curl_setopt_array($cht,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $tHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_DOH_URL => 'https://dns.google/dns-query',CURLOPT_RESOLVE =>['dns.google:443:8.8.8.8']]);
+            curl_setopt_array($cht,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $tHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
             $rawT = curl_exec($cht);
             $httpT = curl_getinfo($cht,CURLINFO_RESPONSE_CODE);
             $errT = curl_error($cht);
@@ -262,7 +262,7 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             $gSource = '';
             $gErr = '';
             $curlM = curl_init(rtrim($gUrl,'/').'/models');
-            curl_setopt_array($curlM,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $gHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HEADER => true,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_DOH_URL => 'https://dns.google/dns-query',CURLOPT_RESOLVE =>['dns.google:443:8.8.8.8']]);
+            curl_setopt_array($curlM,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $gHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HEADER => true,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
             $rawM = curl_exec($curlM);
             if($rawM !== false) {
                 $hdrM = substr($rawM,0,(int)curl_getinfo($curlM,CURLINFO_HEADER_SIZE));
@@ -274,7 +274,7 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             if($foundSid === '') {
                 $bodyC = json_encode(['model' => 'test','messages' =>[['role' => 'user','content' => 'hi']],'max_tokens' => 1]);
                 $curlC = curl_init(rtrim($gUrl,'\/').'\/chat\/completions');
-                curl_setopt_array($curlC,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => array_merge($gHeaders,['Content-Type: application\/json']),CURLOPT_POST => true,CURLOPT_POSTFIELDS => $bodyC,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HEADER => true,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_DOH_URL => 'https://dns.google/dns-query',CURLOPT_RESOLVE =>['dns.google:443:8.8.8.8']]);
+                curl_setopt_array($curlC,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => array_merge($gHeaders,['Content-Type: application\/json']),CURLOPT_POST => true,CURLOPT_POSTFIELDS => $bodyC,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HEADER => true,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
                 $rawC = curl_exec($curlC);
                 if($rawC !== false) {
                     $hdrC = substr($rawC,0,(int)curl_getinfo($curlC,CURLINFO_HEADER_SIZE));
@@ -327,7 +327,7 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
             $supportedParams = null;
             $isOpenRouter = stripos($spUrl,'openrouter.ai')!== false;
             $curlM = curl_init(rtrim($spUrl,'/').'/models');
-            curl_setopt_array($curlM,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $spHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_DOH_URL => 'https://dns.google/dns-query',CURLOPT_RESOLVE =>['dns.google:443:8.8.8.8']]);
+            curl_setopt_array($curlM,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $spHeaders,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
             $rawM = curl_exec($curlM);
             $codeM = (int)curl_getinfo($curlM,CURLINFO_RESPONSE_CODE);
             curl_close($curlM);
@@ -350,7 +350,7 @@ if(isset($_GET['action'])&& $_GET['action']=== 'providers') {
                 if($supportedParams !== null)$notes[]= 'metadata /models: '.count($supportedParams).' param didukung';
             }$bodyP = json_encode(['model' => $spModel,'messages' =>[['role' => 'user','content' => 'hi']],'max_tokens' => 300,'stream' => false]);
             $curlP = curl_init(rtrim($spUrl,'/').'/chat/completions');
-            curl_setopt_array($curlP,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => array_merge($spHeaders,['Content-Type: application/json']),CURLOPT_POST => true,CURLOPT_POSTFIELDS => $bodyP,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_DOH_URL => 'https://dns.google/dns-query',CURLOPT_RESOLVE =>['dns.google:443:8.8.8.8']]);
+            curl_setopt_array($curlP,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => array_merge($spHeaders,['Content-Type: application/json']),CURLOPT_POST => true,CURLOPT_POSTFIELDS => $bodyP,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
             $rawP = curl_exec($curlP);
             $codeP = (int)curl_getinfo($curlP,CURLINFO_RESPONSE_CODE);
             curl_close($curlP);
@@ -554,8 +554,6 @@ if(isset($_GET['action'])&& $_GET['action']=== 'run_status') {
     curl_setopt($chs,CURLOPT_TIMEOUT,300);
     curl_setopt($chs,CURLOPT_SSL_VERIFYPEER,false);
     curl_setopt($chs,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
-    curl_setopt($chs,CURLOPT_DOH_URL,'https://dns.google/dns-query');
-    curl_setopt($chs,CURLOPT_RESOLVE,['dns.google:443:8.8.8.8']);
     curl_setopt($chs,CURLOPT_SSL_VERIFYHOST,0);
     $respS = curl_exec($chs);
     $httpS = curl_getinfo($chs,CURLINFO_RESPONSE_CODE);
@@ -597,8 +595,6 @@ if(isset($_GET['action'])&& $_GET['action']=== 'approval') {
     curl_setopt($ch0,CURLOPT_TIMEOUT,300);
     curl_setopt($ch0,CURLOPT_SSL_VERIFYPEER,false);
     curl_setopt($ch0,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
-    curl_setopt($ch0,CURLOPT_DOH_URL,'https://dns.google/dns-query');
-    curl_setopt($ch0,CURLOPT_RESOLVE,['dns.google:443:8.8.8.8']);
     curl_setopt($ch0,CURLOPT_SSL_VERIFYHOST,0);
     $resp0 = curl_exec($ch0);
     $http0 = curl_getinfo($ch0,CURLINFO_RESPONSE_CODE);
@@ -899,8 +895,6 @@ if(! $hasImages && $userMessage !== '') {
     curl_setopt($ch,CURLOPT_TIMEOUT,300);
     curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
     curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
-    curl_setopt($ch,CURLOPT_DOH_URL,'https://dns.google/dns-query');
-    curl_setopt($ch,CURLOPT_RESOLVE,['dns.google:443:8.8.8.8']);
     curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,0);
     $runsJson = curl_exec($ch);
     $runsHttp = curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
@@ -930,8 +924,6 @@ if(! $hasImages && $userMessage !== '') {
         curl_setopt($ch,CURLOPT_TIMEOUT,300);
         curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
         curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
-        curl_setopt($ch,CURLOPT_DOH_URL,'https://dns.google/dns-query');
-        curl_setopt($ch,CURLOPT_RESOLVE,['dns.google:443:8.8.8.8']);
         curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,0);
         $buffer = '';
         $emittedAnything = false;
@@ -1187,8 +1179,6 @@ curl_setopt($ch,CURLOPT_CONNECTTIMEOUT,30);
 curl_setopt($ch,CURLOPT_TIMEOUT,300);
 curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
 curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
-curl_setopt($ch,CURLOPT_DOH_URL,'https://dns.google/dns-query');
-curl_setopt($ch,CURLOPT_RESOLVE,['dns.google:443:8.8.8.8']);
 curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,0);
 curl_setopt($ch,CURLOPT_WRITEFUNCTION,function($curl,$data) {
     global $buffer,$emittedAnything;

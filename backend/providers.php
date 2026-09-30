@@ -77,7 +77,7 @@ function providers_fetch_models($baseUrl,$apiKey,$ua = '') {
         $headers[]= 'HTTP-Referer: https://c0n73xt.app';
         $headers[]= 'X-Title: Debz AI';
     }$ch = curl_init(rtrim($baseUrl,'/').'/models');
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $headers,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 300,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0]);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => true,CURLOPT_HTTPHEADER => $headers,CURLOPT_CONNECTTIMEOUT => 8,CURLOPT_TIMEOUT => 25,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0]);
     $raw = curl_exec($ch);
     $http = curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
     $err = curl_error($ch);

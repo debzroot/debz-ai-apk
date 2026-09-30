@@ -411,7 +411,7 @@ def api_http():
         return jsonify({"error": "url kosong"}), 400
     if not url.lower().startswith(("http://", "https://")):
         return jsonify({"error": "url harus http(s)://"}), 400
-    cmd = ["curl", "-s", "-S", "--doh-url", "https://dns.google/dns-query", "--resolve", "dns.google:443:8.8.8.8", "-m", str(timeout), "-X", method, "-o", "-", "-w", "\n%{http_code}"]
+    cmd = ["curl", "-s", "-S", "-m", str(timeout), "-X", method, "-o", "-", "-w", "\n%{http_code}"]
     if follow:
         cmd.insert(1, "-L")
     for k, v in (headers or {}).items():
@@ -468,7 +468,7 @@ def api_download():
         p.parent.mkdir(parents=True, exist_ok=True)
         if p.is_dir():
             return jsonify({"error": "path adalah folder, kasih nama file"}), 400
-        cmd = ["curl", "-s", "-S", "-L", "-f", "--doh-url", "https://dns.google/dns-query", "--resolve", "dns.google:443:8.8.8.8", "--max-filesize", str(max_mb * 1024 * 1024),
+        cmd = ["curl", "-s", "-S", "-L", "-f", "--max-filesize", str(max_mb * 1024 * 1024),
                "-m", str(timeout), "-o", str(p), "-w", "%{http_code}", url]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         cancelled = _threading.Event()
