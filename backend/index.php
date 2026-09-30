@@ -288,53 +288,20 @@ function get_file_version ($path )
                 <div id="settings-providers"></div>
                 <button type="button" class="settings-add" id="settings-add">+ Tambah Provider</button>
                 <div id="mp-box" style="margin-top:14px;border-top:1px solid var(--ink);padding-top:10px;">
-                    <div style="font-weight:700;margin-bottom:6px;">🌐 Proxy (HP)</div>
-                    <div id="mp-auto-row" style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-bottom:8px;">
+                    <div style="font-weight:700;margin-bottom:6px;">🌐 Proxy Auto (grabber)</div>
+                    <div style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-bottom:6px;">
                         <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
-                            <input type="checkbox" id="mp-auto" checked /> Auto (grabber refresh tiap 60 dtk)
+                            <input type="checkbox" id="mp-auto" checked /> Auto (refresh tiap 60 dtk)
                         </label>
                         <span id="mp-auto-status" style="font-size:12px;"></span>
                     </div>
-                    <div style="font-size:11.5px;color:var(--txt-dim);line-height:1.5;margin-bottom:8px;">Auto mati + manual kosong = direct. Manual mengalahkan auto.</div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-                        <select id="mp-type" style="flex:1;min-width:90px;">
-                            <option value="http">http</option>
-                            <option value="socks5">socks5</option>
-                            <option value="socks4">socks4</option>
-                        </select>
-                        <input id="mp-host" placeholder="host / IP proxy manual" autocomplete="off" style="flex:2;min-width:130px;" />
-                        <input id="mp-port" placeholder="port" inputmode="numeric" autocomplete="off" style="flex:1;min-width:70px;" />
-                    </div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-                        <input id="mp-user" placeholder="user (opsional)" autocomplete="off" style="flex:1;min-width:100px;" />
-                        <input id="mp-pass" type="password" placeholder="pass (opsional)" autocomplete="off" style="flex:1;min-width:100px;" />
-                    </div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-                        <button type="button" id="mp-save">💾 Simpan &amp; Tes</button>
-                        <button type="button" id="mp-clear">🗑️ Hapus manual</button>
-                        <span id="mp-status" style="font-size:12px;"></span>
-                    </div>
+                    <div style="font-size:11.5px;color:var(--txt-dim);line-height:1.5;">Pool diisi proxy_grabber bawaan (sama kayak desktop). Mati = direct.</div>
                 </div>
                 <script>
                 (function(){
                     var box = document.getElementById('mp-box');
                     if (!box) return;
                     function $(id){ return document.getElementById(id); }
-                    function paintManual(m){
-                        var st = $('mp-status');
-                        if (!m || m.set === false) {
-                            st.style.color = '';
-                            st.textContent = 'Manual: kosong';
-                            return;
-                        }
-                        if (m.live) {
-                            st.style.color = 'var(--green)';
-                            st.textContent = '● Manual LIVE ' + m.type + '://' + m.host + ':' + m.port;
-                        } else {
-                            st.style.color = 'var(--red)';
-                            st.textContent = '● Manual MATI (' + (m.probe || '?') + ')';
-                        }
-                    }
                     function paintAuto(a){
                         var st = $('mp-auto-status');
                         var cb = $('mp-auto');
@@ -342,7 +309,7 @@ function get_file_version ($path )
                         cb.checked = !!a.on;
                         if (!a.on) {
                             st.style.color = '';
-                            st.textContent = 'mati';
+                            st.textContent = 'mati (direct)';
                         } else if (a.pool_n > 0) {
                             st.style.color = 'var(--green)';
                             st.textContent = '● ' + a.pool_n + ' live' + (a.age_s >= 0 ? ' (' + a.age_s + ' dtk lalu)' : '');
@@ -351,72 +318,19 @@ function get_file_version ($path )
                             st.textContent = '● pool kosong (grabber jalan?)';
                         }
                     }
-                    function paint(d){
-                        if (!d) return;
-                        paintManual(d.manual);
-                        paintAuto(d.auto);
-                    }
                     function load(){
                         fetch('api.php?action=manual_proxy', {cache:'no-store'})
                             .then(function(r){ return r.json(); })
-                            .then(function(d){
-                                if (d && d.manual && d.manual.set) {
-                                    $('mp-type').value = d.manual.type || 'http';
-                                    $('mp-host').value = d.manual.host || '';
-                                    $('mp-port').value = d.manual.port || '';
-                                    $('mp-user').value = '';
-                                    $('mp-pass').value = '';
-                                    $('mp-pass').placeholder = d.manual.has_auth ? '******** (tersimpan)' : 'pass (opsional)';
-                                }
-                                paint(d);
-                            })
-                            .catch(function(){ $('mp-status').textContent = 'gagal baca status proxy'; });
+                            .then(function(d){ if (d) paintAuto(d.auto); })
+                            .catch(function(){ $('mp-auto-status').textContent = 'gagal baca status'; });
                     }
-                    $('mp-save').onclick = function(){
-                        $('mp-status').textContent = 'mengetes…';
-                        fetch('api.php?action=manual_proxy', {
-                            method:'POST',
-                            headers:{'Content-Type':'application/json'},
-                            body: JSON.stringify({
-                                type: $('mp-type').value,
-                                host: $('mp-host').value,
-                                port: $('mp-port').value,
-                                user: $('mp-user').value,
-                                pass: $('mp-pass').value
-                            })
-                        }).then(function(r){ return r.json(); })
-                          .then(function(d){
-                              if (!d.success) { $('mp-status').style.color = 'var(--red)'; $('mp-status').textContent = d.error || 'gagal simpan'; return; }
-                              if (d.manual && d.manual.set) {
-                                  $('mp-user').value = '';
-                                  $('mp-pass').value = '';
-                              }
-                              paint(d);
-                              if (window.showToast) window.showToast(d.message || 'proxy tersimpan');
-                          })
-                          .catch(function(){ $('mp-status').textContent = 'gagal simpan proxy'; });
-                    };
-                    $('mp-clear').onclick = function(){
-                        fetch('api.php?action=manual_proxy', {
-                            method:'POST',
-                            headers:{'Content-Type':'application/json'},
-                            body: JSON.stringify({op:'clear'})
-                        }).then(function(r){ return r.json(); })
-                          .then(function(d){
-                              $('mp-host').value=''; $('mp-port').value=''; $('mp-user').value=''; $('mp-pass').value='';
-                              $('mp-pass').placeholder = 'pass (opsional)';
-                              paint(d);
-                              if (window.showToast) window.showToast(d.message || 'manual dihapus');
-                          })
-                          .catch(function(){ $('mp-status').textContent = 'gagal hapus proxy'; });
-                    };
                     $('mp-auto').onchange = function(){
                         fetch('api.php?action=manual_proxy', {
                             method:'POST',
                             headers:{'Content-Type':'application/json'},
                             body: JSON.stringify({op:'auto', on: $('mp-auto').checked})
                         }).then(function(r){ return r.json(); })
-                          .then(function(d){ paint(d); })
+                          .then(function(d){ if (d) paintAuto(d.auto); })
                           .catch(function(){ load(); });
                     };
                     var sb = document.getElementById('settings-btn');

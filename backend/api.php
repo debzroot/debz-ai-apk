@@ -663,10 +663,9 @@ if(isset($_GET['action'])&& $_GET['action']=== 'proxy_next') {
     echo json_encode(['success' => true,'old' => $old,'proxy' => $proxy,'sticky' => (string)($st2['sticky_proxy']?? ''),'sticky_type' => (string)($st2['sticky_type']?? $usedType),'rr_index' => (int)($st2['rr_index']?? 0),'mode' => (string)($st2['mode']?? 'proxy'),'type' => $usedType,'rotation' => (string)($st2['rotation']?? 'roundrobin'),'pool_size' => $poolN,'message' => $proxy !== ''? 'Proxy diganti: '.$proxy: 'Pool kosong — nunggu proxy-grabber, TANPA direct',],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
-// Proxy di HP (v2): MANUAL (user isi) vs AUTO (grabber refresh tiap 60
-// dtk) DILAPORKAN TERPISAH. v1 mencampur: pool auto yang keisi ulang bikin
-// UI ngira manual "gak kehapus". Format pool/state SAMA kayak grabber biar
-// mesin pick/sticky/failover yang sudah teruji langsung kepakai.
+// Status + toggle proxy HP: AUTO (grabber refresh tiap 60 dtk, sama kayak
+// desktop) vs direct. Format pool/state SAMA kayak grabber biar mesin
+// pick/sticky/failover yang sudah teruji langsung kepakai.
 if(isset($_GET['action'])&& $_GET['action']=== 'manual_proxy') {
     header('Content-Type: application/json');
     require_once __DIR__.'/agent.php';
@@ -734,69 +733,8 @@ if(isset($_GET['action'])&& $_GET['action']=== 'manual_proxy') {
         echo json_encode(['success' => true,'auto' => $readAuto(),'message' => $want? 'Auto-proxy NYALA (refresh tiap 60 dtk)': 'Auto-proxy MATI (mode direct)']);
         exit;
     }
-    if(($in['op']?? '')=== 'clear') {
-        foreach(['http','socks5','socks4'] as $t)@ unlink(debz_proxy_list_file($t));
-        debz_proxy_state_update(function(array $s): array {
-            unset($s['manual'],$s['sticky_proxy'],$s['sticky_type']);
-            $s['mode'] = (($s['auto']?? true)=== false)? 'direct': 'proxy';
-            return $s;
-        });
-        if(function_exists('applog'))applog('PROXY','manual_clear',[]);
-        echo json_encode(['success' => true,'manual' => $readManual(),'auto' => $readAuto(),'message' => 'Proxy manual dihapus']);
-        exit;
-    }
-    $type = strtolower(trim((string)($in['type']?? 'http')));
-    if(! in_array($type,['http','socks5','socks4'],true))$type = 'http';
-    $host = strtolower(trim((string)($in['host']?? '')));
-    $host = (string)preg_replace('#^[a-z0-9+.-]+://#i','',$host);
-    $host = trim($host,"/ \t\n\r\0\x0B");
-    $port = (int)($in['port']?? 0);
-    $user = trim((string)($in['user']?? ''));
-    $pass = (string)($in['pass']?? '');
-    if($host === '' || strpos($host,' ')!== false || $port <= 0 || $port > 65535) {
-        http_response_code(400);
-        echo json_encode(['success' => false,'error' => 'Host/port tidak valid']);
-        exit;
-    }
-    if($user !== '' && (strpos($user,'@')!== false || strpos($user,':')!== false || strpos($user,' ')!== false)) {
-        http_response_code(400);
-        echo json_encode(['success' => false,'error' => 'User proxy jangan mengandung @ : spasi']);
-        exit;
-    }
-    // user/pass kosong + sebelumnya ada auth tersimpan = pertahankan (biar
-    // edit host/port tidak menghapus password).
-    $prev = $readManual();
-    if($user === '' && $pass === '' && $prev['set'] && $prev['has_auth'] && $prev['type'] === $type) {
-        $lfPrev = debz_proxy_list_file($type);
-        $ll = @ file($lfPrev,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if(is_array($ll))foreach($ll as $ln0) {
-            $ln0 = trim((string)$ln0);
-            if($ln0 === '')continue;
-            $pu0 = @ parse_url('http://'.$ln0);
-            if(! empty($pu0['user'])) {
-                $user = (string)$pu0['user'];
-                $pass = isset($pu0['pass'])? (string)$pu0['pass']: '';
-                break;
-            }
-        }
-    }
-    $line = ($user !== ''? $user.($pass !== ''? ':'.$pass: '').'@': '').$host.':'.$port;
-    $dir = dirname(debz_proxy_list_file($type));
-    if(! is_dir($dir))@ mkdir($dir,0770,true);
-    foreach(['http','socks5','socks4'] as $t)@ unlink(debz_proxy_list_file($t));
-    @ file_put_contents(debz_proxy_list_file($type),$line."\n",LOCK_EX);
-    @ chmod(debz_proxy_list_file($type),0600);
-    debz_proxy_state_update(function(array $s)use($type): array {
-        $s['mode'] = 'proxy';
-        $s['type'] = $type;
-        $s['manual'] = true;
-        unset($s['sticky_proxy'],$s['sticky_type']);
-        return $s;
-    });
-    $probe = debz_proxy_probe_cached($line,4000);
-    $live = ($probe === 'ok' || $probe === 'timeout');
-    if(function_exists('applog'))applog('PROXY','manual_set',['type' => $type,'host' => $host,'port' => $port,'live' => $live,'probe' => $probe]);
-    echo json_encode(['success' => true,'manual' => $readManual(),'auto' => $readAuto(),'message' => $live? 'Proxy manual aktif & live: '.$host.':'.$port: 'Tersimpan, tapi proxy TIDAK live (probe: '.$probe.') — chat akan gagal, cek host/port'],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    http_response_code(400);
+    echo json_encode(['success' => false,'error' => 'op tidak dikenal']);
     exit;
 }
 if(isset($_GET['action'])&& $_GET['action']=== 'model') {
