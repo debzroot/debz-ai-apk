@@ -52,6 +52,24 @@ public class BootstrapService extends Service {
     }
 
     private void bootInner(int offset, android.content.Context ctx) {
+        // GATE IDEMPOTEN — fix "buka app = menyalakan stack lagi".
+        // Kalau stack sudah hidup di port tersimpan: langsung "up", TANPA
+        // exec proot, TANPA random port, TANPA start ulang.
+        try {
+            if (RootfsManager.ready(ctx) && stackAlive(ctx)) {
+                if (watchdogAlive(ctx)) {
+                    android.util.Log.i("DebzAI", "stack sudah up + sentinel ok, skip boot");
+                    DebzConfig.setStatus(ctx, "up");
+                    return;
+                }
+                // stack nyala tapi yatim (watchdog mati, sisa kill lama):
+                // jangan dibiarkan — jatuh ke boot penuh = restart bersih
+                // + sentinel baru.
+                android.util.Log.w("DebzAI", "stack up tapi orphan, restart bersih");
+            }
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "gate cek gagal, lanjut boot penuh: " + e);
+        }
         DebzConfig.setStatus(ctx, "booting");
         android.util.Log.i("DebzAI", "boot mulai offset=" + offset);
         try {
@@ -59,10 +77,12 @@ public class BootstrapService extends Service {
             android.util.Log.i("DebzAI", "selfHeal ok, ready=" + RootfsManager.ready(ctx));
             boolean rooted = RootDetector.suWorks();
             DebzConfig.setRootMode(ctx, rooted);
-            int web = PortManager.takePreferred(8091 + offset);
-            int api = PortManager.takePreferred(8092 + offset);
+            // PORT REUSE: port yang SAMA dipakai ulang. Random tiap buka app
+            // (= bug lama) bikin .serve.json geser + stack lama jadi yatim.
+            int web = reuseOrTake(ctx, DebzConfig.webPort(ctx), 8091 + offset);
+            int api = reuseOrTake(ctx, DebzConfig.apiPort(ctx), 8092 + offset);
             int fpm = PortManager.takePreferred(9000 + offset);
-            int tools = PortManager.takePreferred(9191 + offset);
+            int tools = reuseOrTake(ctx, DebzConfig.toolsPort(ctx), 9191 + offset);
             DebzConfig.setPorts(ctx, web, api, tools);
 
             String url = DebzConfig.rootfsUrl(ctx);
@@ -106,6 +126,68 @@ public class BootstrapService extends Service {
             w.write(out != null && !out.isEmpty() ? out : "(kosong)");
             w.close();
         } catch (Exception ignored) {}
+    }
+
+    // web + api dua-duanya jawab = stack beneran hidup (bukan port nyangkut).
+    // api = `opencode serve` yang butuh auth: 401 pun dihitung hidup, yang
+    // penting ada yang listen.
+    private static boolean stackAlive(android.content.Context ctx) {
+        int web = DebzConfig.webPort(ctx);
+        if (web <= 0) return false;
+        if (!StackSupervisor.healthyRetry("http://127.0.0.1:" + web + "/", 2)) return false;
+        int api = DebzConfig.apiPort(ctx);
+        if (api > 0 && !StackSupervisor.healthyRetry("http://127.0.0.1:" + api + "/", 1)) {
+            return false;
+        }
+        return true;
+    }
+
+    // sentinel watchdog hidup? kernel sama, /proc kelihatan dari luar proot.
+    private static boolean watchdogAlive(android.content.Context ctx) {
+        try {
+            java.io.File pidFile = new java.io.File(
+                RootfsManager.dir(ctx), "opt/debz/logs/watchdog.pid");
+            if (!pidFile.isFile()) return false;
+            String s = new String(java.nio.file.Files.readAllBytes(
+                pidFile.toPath()), java.nio.charset.StandardCharsets.UTF_8).trim();
+            int pid = Integer.parseInt(s);
+            if (pid <= 0) return false;
+            if (!new java.io.File("/proc/" + pid).isDirectory()) return false;
+            String cmd = new String(java.nio.file.Files.readAllBytes(
+                new java.io.File("/proc/" + pid + "/cmdline").toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+            return cmd.contains("watchdog");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // port tersimpan dipakai ulang. Kalau kepegang sisa stack mati: bersihkan
+    // dulu, tunggu lepas, pakai LAGI port yang sama. Random cuma last resort
+    // kalau port beneran dipakai app lain.
+    private static int reuseOrTake(android.content.Context ctx, int saved, int preferred) {
+        int want = saved > 0 ? saved : preferred;
+        if (PortManager.canBind(want)) return want;
+        try {
+            if (RootfsManager.ready(ctx)) {
+                StackSupervisor.stop(ctx, RootfsManager.dir(ctx));
+            }
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "cleanup port " + want + " gagal: " + e);
+        }
+        for (int i = 0; i < 4 && !PortManager.canBind(want); i++) {
+            try {
+                Thread.sleep(700);
+            } catch (InterruptedException ie) {
+                break;
+            }
+        }
+        if (PortManager.canBind(want)) {
+            android.util.Log.i("DebzAI", "port " + want + " ke-free, reuse");
+            return want;
+        }
+        android.util.Log.w("DebzAI", "port " + want + " macet, fallback random");
+        return PortManager.takePreferred(preferred);
     }
 
     private Notification buildNotif() {        NotificationManager nm = getSystemService(NotificationManager.class);

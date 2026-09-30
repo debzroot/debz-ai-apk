@@ -46,18 +46,25 @@ public final class StackSupervisor {
         android.util.Log.i("DebzAI", "boot: firstBoot kelar, start stack");
         DebzConfig.setStatus(ctx, "starting-stack");
         Process p = ProotManager.exec(ctx, rootfs, env, "/opt/debz/start-stack.sh");
-        // drain() tanpa timeout = gantung selamanya kalau child macet:
-        // tunggu exit dulu (timeout), baru baca sisa output non-blocking.
-        boolean done = p.waitFor(180, java.util.concurrent.TimeUnit.SECONDS);
+        // start-stack.sh = launcher, wajib exit < 30s (ideal < 3s). Timeout
+        // 180s versi lama = status "starting-stack" nempel + proot di-SIGKILL
+        // ninggalin daemon yatim. Readiness dicek terpisah via healthyRetry.
+        boolean done = p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
         String out = drainAvailable(p.getInputStream());
-        if (!done) p.destroyForcibly();
+        if (!done) {
+            android.util.Log.w("DebzAI", "boot: launcher >30s, kill + lanjut health-check");
+            p.destroyForcibly();
+        }
         return out;
     }
 
     public static String stop(Context ctx, File rootfs) throws Exception {
         Process p = ProotManager.exec(ctx, rootfs, baseEnv(), "/opt/debz/stop-stack.sh");
-        String out = drain(p.getInputStream());
-        p.waitFor();
+        // drain() blocking = deadlock: daemon (nginx) mewarisi write-end
+        // pipe stdout proot, pipe ga pernah EOF. Non-blocking + timeout.
+        boolean done = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+        String out = drainAvailable(p.getInputStream());
+        if (!done) p.destroyForcibly();
         return out;
     }
 
@@ -102,14 +109,6 @@ public final class StackSupervisor {
         boolean finished = p.waitFor(300, java.util.concurrent.TimeUnit.SECONDS);
         drainAvailable(p.getInputStream());
         if (!finished) p.destroyForcibly();
-    }
-
-    private static String drain(InputStream in) throws Exception {
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        byte[] tmp = new byte[8192];
-        int n;
-        while ((n = in.read(tmp)) > 0) buf.write(tmp, 0, n);
-        return new String(buf.toByteArray(), StandardCharsets.UTF_8);
     }
 
     // baca output yang sudah tersedia TANPA blocking (dipakai setelah

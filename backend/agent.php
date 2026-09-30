@@ -773,8 +773,31 @@ function debz_cli_proxy_pick(): array {
     $env = ['NODE_USE_ENV_PROXY' => '1','HTTPS_PROXY' => $proxyUrl,'https_proxy' => $proxyUrl,'HTTP_PROXY' => $proxyUrl,'http_proxy' => $proxyUrl,'ALL_PROXY' => $proxyUrl,'all_proxy' => $proxyUrl,'NO_PROXY' => $noProxy,'no_proxy' => $noProxy,];
     return[$proxy,$env];
 }
-function debz_cli_is_proxy_err(string $text): bool {
-    if($text === '')return false;
+// Preflight konektivitas sebelum spawn CLI (mode direct, tanpa proxy).
+// Di HP: kalau provider ga bisa dijangkau langsung, CLI gantung tanpa event
+// error -> user lihat "ga ada balesan". Tangkap di sini, kasih pesan jelas.
+// Hasil di-cache per host selama request (static) biar retry loop ga probe ulang.
+function debz_net_preflight(string $baseUrl) {
+    static $cache = [];
+    $host = strtolower((string)parse_url($baseUrl, PHP_URL_HOST));
+    if($host === '')return true;
+    if(array_key_exists($host, $cache))return $cache[$host];
+    $scheme = strtolower((string)parse_url($baseUrl, PHP_URL_SCHEME));
+    $port = (int)parse_url($baseUrl, PHP_URL_PORT);
+    if($port <= 0)$port = ($scheme === 'http')? 80: 443;
+    $t0 = microtime(true);
+    $fp = @fsockopen($host, $port, $sec, $sem, 4);
+    $dt = round((microtime(true) - $t0) * 1000);
+    if(!is_resource($fp)) {
+        $err = "HP tidak bisa menjangkau $host:$port langsung ($sem, {$dt}ms). Chat butuh internet ke provider ini — cek koneksi, atau pasang proxy di pengaturan.";
+        $cache[$host] = $err;
+        return $err;
+    }
+    fclose($fp);
+    $cache[$host] = true;
+    return true;
+}
+function debz_cli_is_proxy_err(string $text): bool {    if($text === '')return false;
     return (bool)preg_match('/(HTTP\s+429|HTTPS?\s+429|rate limit|quota habis|quota exhausted|too many requests)/i',$text)|| (bool)preg_match('/(connection|tunnel|proxy|could not connect|failed to connect|ECONN|ETIMEDOUT|ENETUNREACH|timeout|socket|reset|refused|broken pipe|network is unreachable|unexpected eof|empty reply|502|503|504)/i',$text);
 }
 function native_chat_once(string $baseUrl,string $apiKey,string $model,array $messages,array $tools,int $maxTokens,array $opts = []): array {
@@ -1870,7 +1893,25 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             if(function_exists('emitDone'))emitDone();
             if(function_exists('applog'))applog('CLI','packet_proxy_pool_empty',[]);
             return;
-        }$env = $cliBaseEnv;
+        }
+        // Mode direct (khas APK: ga ada pool proxy di HP). Kalau provider ga
+        // reachable, CLI gantung bisu sampai deadline 900s — gagalkan cepat
+        // dengan pesan yang bisa dibaca user, jangan hening.
+        if($cliProxy === '') {
+            $pf = debz_net_preflight((string)($P['base_url']?? ''));
+            if($pf !== true) {
+                if(function_exists('termEmit'))termEmit('limit','⚠️ '.$pf);
+                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **".$pf."**\n"]]]]);
+                if(function_exists('emitDone'))emitDone();
+                if(function_exists('applog'))applog('CLI','packet_net_preflight_fail',['err' => (string)$pf]);
+                return;
+            }
+            if(empty($GLOBALS['_debz_direct_noticed'])) {
+                $GLOBALS['_debz_direct_noticed'] = true;
+                if(function_exists('termEmit'))termEmit('info','ℹ️ Mode direct (tanpa proxy) ke '.((string)($P['base_url']?? 'provider')));
+            }
+        }
+        $env = $cliBaseEnv;
         $env['XDG_CONFIG_HOME']= __DIR__.'/opencode-bin/.cfg_home';
         $env['XDG_DATA_HOME']= __DIR__.'/opencode-bin/.data_home';
         // bun/opencode butuh HOME (uv_os_homedir) + PATH tool rootfs.

@@ -25,4 +25,17 @@ public final class PortManager {
             }
         }
     }
+
+    // port yang SAMA harus dipakai ulang tiap boot — random tiap buka app
+    // bikin .serve.json geser + stack lama jadi yatim. canBind = fondasi
+    // "reuse dulu, random cuma last resort".
+    public static boolean canBind(int port) {
+        if (port <= 0) return false;
+        try (ServerSocket s = new ServerSocket(port)) {
+            s.setReuseAddress(true);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
 }
