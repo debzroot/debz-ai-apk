@@ -29,10 +29,25 @@ public class BootstrapService extends Service {
 
     private void boot(int offset, android.content.Context ctx) {
         if (!BOOTING.compareAndSet(false, true)) return;
+        // WakeLock selama boot: CPU tidur + layar mati di tengah extract/
+        // firstboot = stall. Timeout 15 mnt = pengaman mutlak.
+        android.os.PowerManager.WakeLock wl = null;
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager)
+                getSystemService(android.content.Context.POWER_SERVICE);
+            if (pm != null) {
+                wl = pm.newWakeLock(
+                    android.os.PowerManager.PARTIAL_WAKE_LOCK, "debz:boot");
+                wl.acquire(15 * 60 * 1000L);
+            }
+        } catch (Exception ignored) {}
         try {
             bootInner(offset, ctx);
         } finally {
             BOOTING.set(false);
+            try {
+                if (wl != null && wl.isHeld()) wl.release();
+            } catch (Exception ignored) {}
         }
     }
 

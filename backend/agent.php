@@ -1873,6 +1873,11 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         }$env = $cliBaseEnv;
         $env['XDG_CONFIG_HOME']= __DIR__.'/opencode-bin/.cfg_home';
         $env['XDG_DATA_HOME']= __DIR__.'/opencode-bin/.data_home';
+        // bun/opencode butuh HOME (uv_os_homedir) + PATH tool rootfs.
+        // php-fpm (apalagi di proot APK) sering env minim -> default aman.
+        // empty() = desktop tak berubah (HOME/PATH selalu ada di sana).
+        if(empty($env['HOME']))$env['HOME'] = '/root';
+        if(empty($env['PATH']))$env['PATH'] = '/usr/bin:/bin:/usr/sbin:/sbin';
         if($cliProxy !== '') {
             foreach($cliProxyEnv as $_k => $_v) {
                 $env[$_k]= (string)$_v;
