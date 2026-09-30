@@ -224,7 +224,6 @@ function get_file_version ($path )
                 <button type="button" id="provider-btn" class="st-btn" title="Ganti Provider / Model"><span class="st-ico">🧠</span><span class="st-lbl">Provider</span></button>
                 <button type="button" id="compact-btn" class="st-btn" title="Ringkas context jadi summary (hemat token)"><span class="st-ico">🗜️</span><span class="st-lbl">Compact</span></button>
                 <button type="button" id="settings-btn" class="st-btn" title="Settings Provider"><span class="st-ico">⚙️</span><span class="st-lbl">Settings</span></button>
-                <button type="button" id="proxy-btn" class="st-btn" title="Proxy — klik atur di Settings"><span class="st-ico">🕵️</span><span class="st-lbl">Proxy</span></button>
                 <button type="button" id="export-btn" class="st-btn" title="Export Chat"><span class="st-ico">📤</span><span class="st-lbl">Export</span></button>
                 <button type="button" id="clear-btn" class="st-btn" title="Bersihin Chat Session Ini"><span class="st-ico">🧹</span><span class="st-lbl">Clear</span></button>
                 <button type="button" id="android-term-btn" class="st-btn" title="Terminal HP — shell proot" hidden><span class="st-ico">📟</span><span class="st-lbl">Terminal</span></button>
@@ -250,7 +249,6 @@ function get_file_version ($path )
             </div>
             <div class="header-right" style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
                 <button type="button" class="header-btn install-btn" id="install-btn" title="Install sebagai App (PWA)" hidden>Install</button>
-                <span id="proxy-badge" title="Proxy aktif yang dipakai chat sekarang — klik untuk atur" style="display:none;font-size:10px;font-weight:700;padding:4px 10px;border-radius:10px;border:1px solid #4ade80;color:#4ade80;background:rgba(74,222,128,0.12);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;cursor:pointer" onclick="(function(){var b=document.getElementById('proxy-btn');if(b)b.click();})()">🌐 -</span>
                 <button type="button" class="header-btn theme-toggle" id="theme-toggle" title="Mode Gelap">🌙</button>
 
                 <button type="button" class="header-btn pane-toggle" id="act-pane-toggle" title="Live Agent — show/hide jendela review">A_</button>
@@ -287,61 +285,7 @@ function get_file_version ($path )
             <div class="settings-body">
                 <div id="settings-providers"></div>
                 <button type="button" class="settings-add" id="settings-add">+ Tambah Provider</button>
-                <div id="mp-box" style="margin-top:14px;border-top:1px solid var(--ink);padding-top:10px;">
-                    <div style="font-weight:700;margin-bottom:6px;">🌐 Proxy Auto (grabber)</div>
-                    <div style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-bottom:6px;">
-                        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
-                            <input type="checkbox" id="mp-auto" checked /> Auto (refresh tiap 60 dtk)
-                        </label>
-                        <span id="mp-auto-status" style="font-size:12px;"></span>
-                    </div>
-                    <div style="font-size:11.5px;color:var(--txt-dim);line-height:1.5;">Pool diisi proxy_grabber bawaan (sama kayak desktop). Mati = direct.</div>
-                </div>
-                <script>
-                (function(){
-                    var box = document.getElementById('mp-box');
-                    if (!box) return;
-                    function $(id){ return document.getElementById(id); }
-                    function paintAuto(a){
-                        var st = $('mp-auto-status');
-                        var cb = $('mp-auto');
-                        if (!a) return;
-                        cb.checked = !!a.on;
-                        if (!a.on) {
-                            st.style.color = '';
-                            st.textContent = 'mati (direct)';
-                        } else if (a.pool_n > 0) {
-                            st.style.color = 'var(--green)';
-                            st.textContent = '● ' + a.pool_n + ' live' + (a.age_s >= 0 ? ' (' + a.age_s + ' dtk lalu)' : '');
-                        } else {
-                            st.style.color = 'var(--red)';
-                            st.textContent = '● pool kosong (grabber jalan?)';
-                        }
-                    }
-                    function load(){
-                        fetch('api.php?action=manual_proxy', {cache:'no-store'})
-                            .then(function(r){ return r.json(); })
-                            .then(function(d){ if (d) paintAuto(d.auto); })
-                            .catch(function(){ $('mp-auto-status').textContent = 'gagal baca status'; });
-                    }
-                    $('mp-auto').onchange = function(){
-                        fetch('api.php?action=manual_proxy', {
-                            method:'POST',
-                            headers:{'Content-Type':'application/json'},
-                            body: JSON.stringify({op:'auto', on: $('mp-auto').checked})
-                        }).then(function(r){ return r.json(); })
-                          .then(function(d){ if (d) paintAuto(d.auto); })
-                          .catch(function(){ load(); });
-                    };
-                    var sb = document.getElementById('settings-btn');
-                    if (sb) sb.addEventListener('click', load);
-                    load();
-                    setInterval(function(){
-                        var p = document.getElementById('settings-panel');
-                        if (p && !p.hidden) load();
-                    }, 15000);
-                })();
-                </script>
+
             </div>
         </div>
 
@@ -416,55 +360,7 @@ function get_file_version ($path )
 ?>
 "></script>
 
-<script>
-// APK/HP: tidak ada Deproxy :8766 maupun proxy_start.php (desktop-only).
-// Tombol sidebar dialihkan ke section Proxy di Settings — yang beneran
-// jalan (auto-grabber + manual). Tanpa ini tombol = mati total.
-(function(){
-    var b = document.getElementById('proxy-btn');
-    if (!b) return;
-    function setBtn(on){
-        b.classList.toggle('on', !!on);
-        b.title = on ? 'Proxy AKTIF — klik atur di Settings' : 'Proxy — klik atur di Settings';
-    }
-    window.DEBZ_setProxyBtn = setBtn;
-    b.addEventListener('click', function(){
-        var bd = document.getElementById('settings-backdrop');
-        var p = document.getElementById('settings-panel');
-        if (bd) bd.hidden = false;
-        if (p) {
-            p.hidden = false;
-            var mp = document.getElementById('mp-box');
-            if (mp && mp.scrollIntoView) {
-                try { mp.scrollIntoView({block:'start'}); } catch(e) {}
-            }
-        }
-        fetch('api.php?action=manual_proxy', {cache:'no-store'})
-            .then(function(r){ return r.json(); })
-            .then(function(d){
-                var live = false;
-                if (d) {
-                    if (d.manual && d.manual.set && d.manual.live) live = true;
-                    if (d.auto && d.auto.on && d.auto.pool_n > 0) live = true;
-                }
-                setBtn(live);
-            })
-            .catch(function(){});
-    });
-    fetch('api.php?action=manual_proxy', {cache:'no-store'})
-        .then(function(r){ return r.json(); })
-        .then(function(d){
-            var live = false;
-            if (d) {
-                if (d.manual && d.manual.set && d.manual.live) live = true;
-                if (d.auto && d.auto.on && d.auto.pool_n > 0) live = true;
-            }
-            setBtn(live);
-        })
-        .catch(function(){});
-})();
 
-</script>
 
 <script>
 // Dark / Light mode toggle — persist di localStorage

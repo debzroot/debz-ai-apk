@@ -887,66 +887,6 @@
         if (termMeta) termMeta.textContent = meta || (on ? 'running' : 'idle');
     }
 
-    // ===== PROXY LIVE (polling proxy_manager port 8766) =====
-    var __proxyPollTimer = null;
-    var __lastProxy = null;
-    function proxyPort() { return (window.DEBZ_PROXY_PORT || '8766'); }
-    function proxyActive() { return __lastProxy; }
-    function setProxyBtnState(on) {
-        var pb = document.getElementById('proxy-btn');
-        if (!pb) return;
-        if (typeof window.DEBZ_setProxyBtn === 'function') {
-            window.DEBZ_setProxyBtn(on);
-        } else {
-            pb.classList.toggle('on', !!on);
-            pb.title = on
-                ? 'Proxy Manager AKTIF — klik buka Deproxy (stop service ada di dalam page)'
-                : 'Proxy Manager — nyalakan service & buka Deproxy';
-        }
-    }
-    function termLogProxy(cur, ev) {
-        if (!cur) return;
-        var by = (ev && ev.by) ? ev.by : 'webui';
-        var old = (ev && ev.old) ? ev.old : null;
-        if (old && old !== cur) termLog('info', '🌐 [' + by + '] Next Proxy: ' + cur + ' (old: ' + old + ')');
-        else termLog('info', '🌐 Proxy aktif: ' + cur);
-    }
-    function pollProxy() {
-        if (!window.fetch) return;
-        fetch('http://' + location.hostname + ':' + proxyPort() + '/api/current')
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (!d || !d.ok) { setProxyBtnState(false); return; }
-                setProxyBtnState(true);
-                var cur = d.proxy || '';
-                var ev = d.rotate_event || {};
-                var badge = document.getElementById('proxy-badge');
-                if (badge) {
-                    if (cur) {
-                        badge.textContent = '🌐 ' + cur;
-                        badge.style.display = 'inline-block';
-                        badge.title = 'Proxy aktif: ' + cur + ' · mode ' + (d.mode || 'direct') + ' · klik buka Proxy Manager';
-                    } else {
-                        badge.style.display = 'none';
-                    }
-                }
-                if (cur && cur !== __lastProxy) {
-                    __lastProxy = cur;
-                    termLogProxy(cur, ev);
-                }
-            })
-            .catch(function() {
-                setProxyBtnState(false);
-                var badge = document.getElementById('proxy-badge');
-                if (badge) badge.style.display = 'none';
-            });
-    }
-    function startProxyPoll() {
-        if (__proxyPollTimer) return;
-        pollProxy();
-        __proxyPollTimer = setInterval(pollProxy, 2000);
-    }
-
     function openTerm() {
         if (!termModal) return;
         termOpen = true;
@@ -3639,5 +3579,4 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tx) tx.classList.toggle('unwrap');
         });
     }
-    if (typeof startProxyPoll === 'function') startProxyPoll();
 });
