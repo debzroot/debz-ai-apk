@@ -17,8 +17,10 @@ android {
         applicationId = "ai.debz"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0-run"
+        // CI isi via env biar tiap build keidentifikasi (sidebar device
+        // info + cegah salah-install artefak lawas). Default = dev lokal.
+        versionCode = (System.getenv("APK_VCODE") ?: "2").toInteger()
+        versionName = System.getenv("APK_VNAME") ?: "0.2.0-run"
     }
 
     // rootfs-mini.tar.gz dibundle di assets — jangan dikompres ulang

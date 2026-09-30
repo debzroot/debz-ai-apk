@@ -148,6 +148,8 @@ jobs:
           GRADLE_OPTS: -Xmx4g -Dfile.encoding=UTF-8
           DEBZ_KEYSTORE_PASSWORD: ${{ secrets.DEBZ_KEYSTORE_PASSWORD }}
           DEBZ_KEY_ALIAS: ${{ secrets.DEBZ_KEY_ALIAS }}
+          APK_VNAME: 0.2.0-r${{ github.run_number }}
+          APK_VCODE: ${{ github.run_number }}
         run: gradle :app:assembleRelease --no-daemon --max-workers=1
 
       - name: Upload APK

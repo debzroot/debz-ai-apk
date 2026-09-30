@@ -184,7 +184,7 @@ public class MainActivity extends Activity {
             if (apiPort <= 0) apiPort = 8092 + off;
             int toolsPort = DebzConfig.toolsPort(MainActivity.this);
             if (toolsPort <= 0) toolsPort = 9191 + off;
-            return "{\"v\":\"" + OtaManager.currentVersion() + "\""
+            return "{\"v\":\"" + OtaManager.currentVersion(MainActivity.this) + "\""
                 + ",\"root\":" + DebzConfig.rootMode(MainActivity.this)
                 + ",\"web\":" + webPort + ",\"api\":" + apiPort
                 + ",\"tools\":" + toolsPort + "}";
