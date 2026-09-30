@@ -744,7 +744,10 @@ function debz_net_preflight(string $baseUrl) {
     $port = (int)parse_url($baseUrl, PHP_URL_PORT);
     if($port <= 0)$port = ($scheme === 'http')? 80: 443;
     $t0 = microtime(true);
-    $fp = @fsockopen($host, $port, $sec, $sem, 4);
+    // Timeout 12 dtk: di HP (VPN/proxy operator) TCP connect saja bisa 5 dtk+.
+    // Preflight harus lebih longgar dari koneksi asli (curl 8 dtk+), kalau
+    // tidak = false negative "tidak bisa menjangkau" padahal engine tembus.
+    $fp = @fsockopen($host, $port, $sec, $sem, 12);
     $dt = round((microtime(true) - $t0) * 1000);
     if(!is_resource($fp)) {
         $err = "HP tidak bisa menjangkau $host:$port langsung ($sem, {$dt}ms). Chat butuh internet ke provider ini — cek koneksi HP (data/WiFi) lalu coba lagi.";
@@ -1516,7 +1519,9 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     }stream_set_blocking($ssePipes[1],false);
     stream_set_blocking($ssePipes[2],false);
     $postDone = false;
+    $postDoneAt = 0;
     $cardDone = false;
+    $cardOut = 0;
     $msgParts = [['type' => 'text','text' => (string)$userText]];
     foreach($attachFiles as $af) {
         $af = (string)$af;
@@ -1639,6 +1644,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
                         $bool = native_oc_card_emit($evType,$props,$evPart);
                         if($bool !== '') {
                             $lastAct = time();
+                            if($bool === 'text')$cardOut ++;
                         }
                     }
                 }
@@ -1650,12 +1656,16 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
             $ps = proc_get_status($postProc);
             if(isset($ps['running'])&& ! $ps['running']&& ! $postDone) {
                 $postDone = true;
+                $postDoneAt = time();
                 @ fclose($postPipes[1]);
                 @ fclose($postPipes[2]);
                 $lastAct = time();
             }
         }
-        if($postDone && ! $drainedAny) {
+        // RACE FIX: POST curl kelar duluan sebelum serve mulai streaming SSE
+        // (HP lambat). Jangan break saat sepi — kasih grace 15 dtk. Serve
+        // normal nutup SSE sendiri saat selesai (break via sse exit).
+        if($postDone && ! $drainedAny && (time()- $postDoneAt)>= 15) {
             $cardDone = true;
             break;
         }
@@ -1698,6 +1708,10 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     }
     if(is_file($postTmp))@ unlink($postTmp);
     if(isset($postBodyTmp)&& is_file($postBodyTmp))@ unlink($postBodyTmp);
+    if($cardOut === 0) {
+        if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Serve tidak memancarkan jawaban** (SSE sepi). Coba kirim ulang — kalau berulang, nyalakan Tools (jalur run langsung).\n"]]]]);
+        if(function_exists('applog'))applog('OPENCODE_CARD','empty_sse',['thread' => substr($threadId,0,40)]);
+    }
     if(function_exists('emitDone'))emitDone();
 }
 function native_oc_card_emit(string $evType,array $props,array $evPart): string {
