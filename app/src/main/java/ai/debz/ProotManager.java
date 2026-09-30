@@ -75,6 +75,20 @@ public final class ProotManager {
         // lewat LD_LIBRARY_PATH
         File libDir = new File(ctx.getFilesDir(), "bin");
         ensureNativeLibs(ctx, libDir);
+        // proot Termux butuh loader eksternal; default-nya path Termux
+        // (/data/data/com.termux/.../loader) yang tak ada di HP user ->
+        // semua execve ENOENT. Loader dibundle di assets, arahkan kesini.
+        ensureLoader(ctx, libDir);
+        File loader = new File(libDir, "loader");
+        if (loader.exists()) {
+            loader.setExecutable(true);
+            pb.environment().put("PROOT_LOADER", loader.getAbsolutePath());
+        }
+        File loader32 = new File(libDir, "loader32");
+        if (loader32.exists()) {
+            loader32.setExecutable(true);
+            pb.environment().put("PROOT_LOADER_32", loader32.getAbsolutePath());
+        }
         String oldLp = pb.environment().get("LD_LIBRARY_PATH");
         pb.environment().put("LD_LIBRARY_PATH", libDir.getAbsolutePath()
             + (oldLp != null && !oldLp.isEmpty() ? ":" + oldLp : ""));
@@ -86,6 +100,25 @@ public final class ProotManager {
         pb.environment().put("PROOT_TMP_DIR", tmpDir.getAbsolutePath());
         pb.redirectErrorStream(true);
         return pb.start();
+    }
+
+    // loader proot (lihat atas): dari assets ke files/bin, sekali aja
+    private static void ensureLoader(Context ctx, File libDir) {
+        String[] assets = ctx.getAssets().list("");
+        if (assets == null) return;
+        for (String name : assets) {
+            if (!"loader".equals(name) && !"loader32".equals(name)) continue;
+            File out = new File(libDir, name);
+            if (out.exists()) continue;
+            libDir.mkdirs();
+            try (InputStream in = ctx.getAssets().open(name);
+                 OutputStream o = new FileOutputStream(out)) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+            } catch (Exception ignored) {}
+            out.setExecutable(true);
+        }
     }
 
     // semua lib*.so* di assets (dependensi proot) diekstrak sekali ke bin

@@ -105,6 +105,14 @@ jobs:
           fetch_lib "libtalloc" "libtalloc.so.*"
           fetch_lib "libandroid-shmem" "libandroid-shmem.so*"
           fetch_lib "libtermux-exec,termux-exec" "libtermux-exec.so*"
+          # proot Termux butuh loader eksternal (bukan bundled): default-nya
+          # di path Termux (/data/data/com.termux/.../loader) yang tak ada
+          # di HP user -> execve selalu ENOENT. Bawa loader+loader32 di
+          # assets, app set PROOT_LOADER saat exec.
+          cp /tmp/proot-ex/data/data/com.termux/files/usr/libexec/proot/loader app/src/main/assets/loader
+          cp /tmp/proot-ex/data/data/com.termux/files/usr/libexec/proot/loader32 app/src/main/assets/loader32
+          chmod +x app/src/main/assets/loader app/src/main/assets/loader32
+          ls app/src/main/assets/ | grep -E 'loader' || { echo "::error::loader proot tidak kebawa"; exit 1; }
           ls app/src/main/assets/ | grep -E '\.so' || { echo "::error::tidak ada .so kebawa"; exit 1; }
           readelf -d app/src/main/jniLibs/arm64-v8a/libproot.so | grep NEEDED || true
           chmod +x app/src/main/jniLibs/arm64-v8a/libproot.so
