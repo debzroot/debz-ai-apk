@@ -1802,8 +1802,102 @@ def root_handler():
     return jsonify({"error": "Not Found"}), 404
 
 
+# ---------------------------------------------------------------------------
+# Auto proxy-grabber (HP): pakai proxy_grabber.py ASLI (contoh desktop yang
+# sudah teruji — pool/state format identik, mesin pick PHP langsung cocok).
+# refresh_only (--refresh) = mode RINGAN fresh-first, dirancang buat dijaga
+# terus-terusan. Scheduler tipis ini jalanin one-shot tiap 60 detik.
+# Hormat: state manual=true (proxy manual user) atau auto=false (user
+# matikan) -> idle total. Skip kalau run sebelumnya masih jalan.
+# ---------------------------------------------------------------------------
+_AUTO_PROXY_EVERY = 60
+_auto_proxy_started = False
+_auto_proxy_proc = None
+
+
+def _auto_proxy_state():
+    root = Path(__file__).resolve().parent
+    sf = root / "proxy-grabber" / "proxy_state.json"
+    try:
+        return json.loads(sf.read_text()) if sf.is_file() else {}
+    except Exception:
+        return {}
+
+
+def _auto_proxy_allowed(st):
+    if not isinstance(st, dict):
+        return True
+    if st.get("manual"):
+        return False
+    return st.get("auto", True) is not False
+
+
+def _auto_proxy_run_once():
+    global _auto_proxy_proc
+    if _auto_proxy_proc is not None and _auto_proxy_proc.poll() is None:
+        return
+    root = Path(__file__).resolve().parent
+    gd = root / "proxy-grabber"
+    script = gd / "proxy_grabber.py"
+    if not script.is_file():
+        return
+    log = gd / "refresh.log"
+    try:
+        if log.is_file() and log.stat().st_size > 512 * 1024:
+            log.write_text("")
+    except Exception:
+        pass
+    env = dict(os.environ)
+    env["AI_PROXY_FRESH_TOP"] = env.get("AI_PROXY_FRESH_TOP", "3")
+    env["AI_PROXY_FRESH_BUDGET"] = env.get("AI_PROXY_FRESH_BUDGET", "250")
+    try:
+        lf = log.open("a")
+    except Exception:
+        lf = None
+    try:
+        _auto_proxy_proc = subprocess.Popen(
+            [sys.executable, "proxy_grabber.py", "--refresh"],
+            cwd=str(gd), env=env,
+            stdout=lf or subprocess.DEVNULL,
+            stderr=subprocess.STDOUT)
+        # fd parent ditutup langsung (child pegang dup-nya sendiri) —
+        # kalau tidak: fd leak tiap run + rotasi log rusak.
+        try:
+            if lf:
+                lf.close()
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[auto-proxy] spawn gagal: {e}", file=sys.stderr)
+        try:
+            if lf:
+                lf.close()
+        except Exception:
+            pass
+
+
+def _auto_proxy_loop():
+    while True:
+        try:
+            if _auto_proxy_allowed(_auto_proxy_state()):
+                _auto_proxy_run_once()
+        except Exception as e:
+            print(f"[auto-proxy] loop gagal: {e}", file=sys.stderr)
+        _time.sleep(_AUTO_PROXY_EVERY)
+
+
+def start_auto_proxy():
+    global _auto_proxy_started
+    if _auto_proxy_started:
+        return
+    _auto_proxy_started = True
+    t = _threading.Thread(target=_auto_proxy_loop, name="auto-proxy", daemon=True)
+    t.start()
+
+
 if __name__ == "__main__":
     _startup_helpers()
+    start_auto_proxy()
     _port = int(os.getenv("TOOLS_PORT", os.getenv("BACKEND_PORT", 9191)))
     if _port < 1024:
         print(f"[tool-server] Port {_port} < 1024, naikkan ke 9191 (butuh root)", file=sys.stderr)
