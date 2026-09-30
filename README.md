@@ -45,3 +45,17 @@ jalan (warning) dan HP generate sendiri.
    install wheels offline) → `start-stack.sh`
    (php-fpm + nginx serve `/opt/debz/app` + opencode serve di port API).
 3. WebView load backend lokal → login password `1337` → chat langsung jalan.
+
+## Alur dev (HP dulu, GH ngikut)
+
+Repo ini PRIVATE sampai stabil — yang nentuin open public nanti owner.
+
+1. **HP = meja operasi.** Semua fix dioprek + diverifikasi langsung di rootfs
+   HP (`/data/data/ai.debz/files/rootfs/...`) via bridge, tanpa reinstall.
+   Backend PHP aktif per-request, jadi hot-patch langsung ngefek.
+2. **GH = cermin yang terbukti.** Yang udah verified di HP doang yang
+   di-commit/push. Tiap push `main` → CI build rootfs+APK → `ci-latest`.
+3. **User = terima beres.** Tiap ada `ROOTFS_EPOCH` baru, app wipe + extract
+   ulang otomatis. Notif update muncul via `OtaManager` (poll `ci-latest`).
+4. Aturan epoch: naikkan `ROOTFS_EPOCH` tiap ada perubahan rootfs/backend
+   tak-kompatibel — itu satu-satunya cara HP narik state baru.
