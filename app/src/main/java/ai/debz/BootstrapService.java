@@ -99,11 +99,34 @@ public class BootstrapService extends Service {
                 }
             }
             if (RootfsManager.ready(ctx)) {
-                DebzConfig.setStatus(ctx, "starting-stack");
-                android.util.Log.i("DebzAI", "stack start web=" + web + " api=" + api);
-                String out = StackSupervisor.start(ctx, RootfsManager.dir(ctx),
-                    StackSupervisor.envFor(web, api, fpm, tools));
-                boolean ok = StackSupervisor.healthyRetry("http://127.0.0.1:" + web + "/", 10);
+                // Bounded retry 3x: HP kentang kadang butuh 2x start (daemon
+                // ke-OOM / race bind). App sembuh sendiri — user JANGAN
+                // disuruh tutup-buka manual lagi.
+                String out = "";
+                boolean ok = false;
+                for (int attempt = 1; attempt <= 3 && !ok; attempt++) {
+                    if (attempt > 1) {
+                        DebzConfig.setStatus(ctx, "retry-stack");
+                        android.util.Log.i("DebzAI", "retry stack " + attempt + "/3");
+                        try {
+                            Thread.sleep(5000);
+                        } catch (InterruptedException ie) {
+                            break;
+                        }
+                        try {
+                            StackSupervisor.stop(ctx, RootfsManager.dir(ctx));
+                        } catch (Exception se) {
+                            android.util.Log.w("DebzAI", "cleanup retry gagal: " + se);
+                        }
+                    } else {
+                        DebzConfig.setStatus(ctx, "starting-stack");
+                    }
+                    android.util.Log.i("DebzAI", "stack start web=" + web + " api=" + api
+                        + " try=" + attempt);
+                    out = StackSupervisor.start(ctx, RootfsManager.dir(ctx),
+                        StackSupervisor.envFor(web, api, fpm, tools));
+                    ok = StackSupervisor.healthyRetry("http://127.0.0.1:" + web + "/", 10);
+                }
                 if (!ok) saveStackLog(ctx, out);
                 android.util.Log.i("DebzAI", "stack akhir ok=" + ok);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");

@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
@@ -36,6 +37,10 @@ public class MainActivity extends Activity {
     private boolean webLoaded;
     private boolean webError;
     private int webRetries;
+    // kapan stage kerja terakhir dimulai (elapsedRealtime). Splash wajib
+    // nunjukin detik berjalan — bar indeterminate yang diem = user kira
+    // hang ("efeknya udah di ujung"). Detik yang jalan = bukti hidup.
+    private long bootT0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -152,7 +157,14 @@ public class MainActivity extends Activity {
         String raw = DebzConfig.status(this);
         int pct = progressOf(raw);
         boolean up = "up".equals(raw);
-        splashStage.setText(humanize(raw));
+        boolean working = !(up || "idle".equals(stageOf(raw)));
+        if (working && bootT0 == 0) bootT0 = SystemClock.elapsedRealtime();
+        if (!working) bootT0 = 0;
+        String label = humanize(raw);
+        if (working && bootT0 > 0) {
+            label += " (" + ((SystemClock.elapsedRealtime() - bootT0) / 1000) + " dtk)";
+        }
+        splashStage.setText(label);
         if (pct >= 0) {
             splashBar.setIndeterminate(false);
             splashBar.setProgress(pct);
@@ -281,8 +293,9 @@ public class MainActivity extends Activity {
             case "verify": return "Verifikasi SHA256\u2026";
             case "extract": return "Ekstrak rootfs\u2026";
             case "starting-stack": return "Menyalakan stack\u2026";
+            case "retry-stack": return "Mencoba ulang otomatis\u2026";
             case "up": return "Online, backend jalan";
-            case "stack-fail": return "Stack gagal start, tap Restart";
+            case "stack-fail": return "Stack gagal start (3x coba)";
             case "no-rootfs": return "Rootfs tidak ada di APK";
             case "error": return "Error: " + raw.substring("error:".length());
             default: return raw;
@@ -298,10 +311,11 @@ public class MainActivity extends Activity {
             case "extract":
                 return "Rootfs 411MB lagi disiapkan (2-5 menit di HP kentang), jangan tutup app. Progress ada di atas.";
             case "starting-stack":
+            case "retry-stack":
             case "booting":
-                return "Stack lagi naik, tunggu sebentar lalu tap Reload.";
+                return "Stack lagi naik, tunggu sebentar. Detik di atas bukti proses jalan, bukan hang.";
             case "stack-fail":
-                return "Tutup dan buka ulang app untuk coba lagi, kalau masih gagal buka Terminal di sidebar.";
+                return "Sudah dicoba ulang 3x otomatis. Buka Terminal di sidebar, kirim isi stack-last.log ke developer. Jangan tutup-buka berulang, hasilnya sama.";
             case "no-rootfs":
                 return "APK tidak membawa rootfs. Install ulang dari artifact debz-ai-apk yang benar.";
             default:
