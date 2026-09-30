@@ -27,6 +27,7 @@ public class BootstrapService extends Service {
     private void boot(int offset, android.content.Context ctx) {
         DebzConfig.setStatus(ctx, "booting");
         try {
+            RootfsManager.selfHeal(ctx);
             boolean rooted = RootDetector.suWorks();
             DebzConfig.setRootMode(ctx, rooted);
             int web = PortManager.takePreferred(8091 + offset);

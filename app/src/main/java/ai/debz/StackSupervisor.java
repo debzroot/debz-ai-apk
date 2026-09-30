@@ -13,8 +13,16 @@ import java.util.Map;
 public final class StackSupervisor {
     private StackSupervisor() {}
 
-    public static Map<String, String> envFor(int web, int api, int fpm) {
+    public static Map<String, String> baseEnv() {
         Map<String, String> env = new HashMap<>();
+        // tool rootfs (mkdir/sed/pkill/php/...) — PATH bawaan app Android
+        // (/system/bin/...) tak ada di proot -> command not found semua.
+        env.put("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+        return env;
+    }
+
+    public static Map<String, String> envFor(int web, int api, int fpm) {
+        Map<String, String> env = baseEnv();
         env.put("PORT_WEB", String.valueOf(web));
         env.put("PORT_API", String.valueOf(api));
         env.put("PORT_FPM", String.valueOf(fpm));
@@ -34,7 +42,7 @@ public final class StackSupervisor {
     }
 
     public static String stop(Context ctx, File rootfs) throws Exception {
-        Process p = ProotManager.exec(ctx, rootfs, null, "/opt/debz/stop-stack.sh");
+        Process p = ProotManager.exec(ctx, rootfs, baseEnv(), "/opt/debz/stop-stack.sh");
         String out = drain(p.getInputStream());
         p.waitFor();
         return out;

@@ -54,6 +54,8 @@ public final class ProotManager {
         a.add("-0");
         a.add("-b"); a.add("/proc:/proc");
         a.add("-b"); a.add("/sys:/sys");
+        // /dev/null wajib ada (redirect shell + nginx emerg tanpa ini)
+        a.add("-b"); a.add("/dev:/dev");
         File sd = new File("/sdcard");
         if (sd.exists()) {
             a.add("-b"); a.add("/sdcard:/mnt/sdcard");
@@ -109,7 +111,15 @@ public final class ProotManager {
         for (String name : assets) {
             if (!"loader".equals(name) && !"loader32".equals(name)) continue;
             File out = new File(libDir, name);
-            if (out.exists()) continue;
+            // file milik uid lama (install -k/reinstall) tak bisa dieksekusi
+            // -> buang, salin ulang sebagai uid sekarang.
+            if (out.exists()) {
+                if (out.canWrite()) {
+                    out.setExecutable(true);
+                    continue;
+                }
+                out.delete();
+            }
             libDir.mkdirs();
             try (InputStream in = ctx.getAssets().open(name);
                  OutputStream o = new FileOutputStream(out)) {
@@ -129,7 +139,10 @@ public final class ProotManager {
             if (name == null || !name.startsWith("lib")) continue;
             if (!name.endsWith(".so") && !name.contains(".so.")) continue;
             File out = new File(libDir, name);
-            if (out.exists()) continue;
+            if (out.exists()) {
+                if (out.canWrite()) continue;
+                out.delete();
+            }
             libDir.mkdirs();
             try (InputStream in = ctx.getAssets().open(name);
                  OutputStream o = new FileOutputStream(out)) {

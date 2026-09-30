@@ -35,6 +35,35 @@ public final class RootfsManager {
         return marker(ctx).exists() && new File(dir(ctx), "opt/debz/start-stack.sh").exists();
     }
 
+    // data milik install lama (uid beda, mode 0700) bikin EACCES abadi
+    // di semua exec. tulis-cek gagal = tree sampah -> wipe; wipe gagal
+    // juga = user wajib Clear storage (pesan jelas, bukan error samar).
+    public static void selfHeal(Context ctx) throws Exception {
+        File d = dir(ctx);
+        if (writableDir(d)) return;
+        if (ready(ctx)) {
+            throw new Exception("rootfs tak bisa ditulis "
+                + "(milik install lama?), Clear storage di Settings > Apps > Debz AI");
+        }
+        wipe(ctx);
+        if (!writableDir(d)) {
+            throw new Exception("rootfs tak bisa ditulis setelah wipe, "
+                + "Clear storage di Settings > Apps > Debz AI");
+        }
+    }
+
+    private static boolean writableDir(File d) {
+        if (!d.exists()) return true;
+        File t = new File(d, ".writetest");
+        try {
+            if (t.createNewFile()) {
+                t.delete();
+                return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     public static boolean hasBundled(Context ctx) {
         return bundledName(ctx) != null;
     }
