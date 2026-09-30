@@ -41,7 +41,10 @@ public final class StackSupervisor {
         firstBoot(ctx, rootfs, env);
         Process p = ProotManager.exec(ctx, rootfs, env, "/opt/debz/start-stack.sh");
         String out = drain(p.getInputStream());
-        p.waitFor();
+        // skrip melaunch daemon lalu exit; kalau macet (pipe ketahan dsb),
+        // jangan gantung selamanya — daemon yang udah naik tetap dipakai.
+        boolean done = p.waitFor(180, java.util.concurrent.TimeUnit.SECONDS);
+        if (!done) p.destroyForcibly();
         return out;
     }
 
@@ -53,6 +56,24 @@ public final class StackSupervisor {
     }
 
     public static boolean healthy(String url) {
+        return healthyRetry(url, 1);
+    }
+
+    // daemon butuh detik buat listen; cek sekali = stack-fail palsu.
+    // Dipakai BootstrapService dengan retry biar status akurat.
+    public static boolean healthyRetry(String url, int tries) {
+        for (int i = 0; i < tries; i++) {
+            if (ping(url)) return true;
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException ignored) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static boolean ping(String url) {
         HttpURLConnection c = null;
         try {
             c = (HttpURLConnection) new URL(url).openConnection();
@@ -73,7 +94,7 @@ public final class StackSupervisor {
         if (done.exists()) return;
         Process p = ProotManager.exec(ctx, rootfs, env, "/opt/debz/first-boot-pip.sh");
         drain(p.getInputStream());
-        p.waitFor();
+        if (!p.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly();
     }
 
     private static String drain(InputStream in) throws Exception {

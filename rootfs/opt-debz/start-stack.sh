@@ -17,8 +17,10 @@ if [ ! -f "$APP/index.php" ]; then
   echo "<h3>debz-ai stack OK</h3><p>web=$PORT_WEB api=$PORT_API</p>" > "$APP/index.html"
 fi
 
-# bunuh stack otomatis kalau app Android mati (uninstall/force-stop/crash)
-"$R/watchdog.sh" &
+# bunuh stack otomatis kalau app Android mati (uninstall/force-stop/crash).
+# Output WAJIB redirect: kalau nongkrong di pipe stdout, Java drain()
+# nunggu EOF selamanya -> status mentok "starting-stack" abadi.
+"$R/watchdog.sh" >>"$R/logs/watchdog.log" 2>&1 &
 echo "watchdog pid $!"
 
 # -D = jangan daemonize, tapi tetap & biar script lanjut ke nginx/opencode

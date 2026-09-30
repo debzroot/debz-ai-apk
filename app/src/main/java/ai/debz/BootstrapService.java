@@ -53,7 +53,7 @@ public class BootstrapService extends Service {
                 DebzConfig.setStatus(ctx, "starting-stack");
                 String out = StackSupervisor.start(ctx, RootfsManager.dir(ctx),
                     StackSupervisor.envFor(web, api, fpm, tools));
-                boolean ok = StackSupervisor.healthy("http://127.0.0.1:" + web + "/");
+                boolean ok = StackSupervisor.healthyRetry("http://127.0.0.1:" + web + "/", 10);
                 if (!ok) saveStackLog(ctx, out);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");
             } else {
