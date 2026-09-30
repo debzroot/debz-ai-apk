@@ -19,6 +19,10 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 public final class RootfsManager {
     private RootfsManager() {}
 
+    // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
+    // baru): device wipe + extract ulang otomatis, tanpa pm clear.
+    private static final int ROOTFS_EPOCH = 2;
+
     public interface Progress {
         void on(String stage, int percent);
     }
@@ -68,6 +72,25 @@ public final class RootfsManager {
         return bundledName(ctx) != null;
     }
 
+    private static boolean epochOk(Context ctx) {
+        try {
+            java.util.Scanner s = new java.util.Scanner(new File(dir(ctx), ".epoch"));
+            boolean ok = s.hasNextInt() && s.nextInt() == ROOTFS_EPOCH;
+            s.close();
+            return ok;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void writeEpoch(Context ctx) {
+        try {
+            java.io.FileWriter w = new java.io.FileWriter(new File(dir(ctx), ".epoch"), false);
+            w.write(String.valueOf(ROOTFS_EPOCH));
+            w.close();
+        } catch (Exception ignored) {}
+    }
+
     // nama file aktual di assets: rantai CI kadang menyimpan .tar polos
     // (bukan .tar.gz) — deteksi prefix biar dua-duanya jalan.
     public static String bundledName(Context ctx) {
@@ -84,6 +107,9 @@ public final class RootfsManager {
         if (ready(ctx) && !new File(dir(ctx), "bin/sh").exists()) {
             wipe(ctx);
         }
+        // tarball baru (epoch beda) -> extract ulang biar backend/conf baru
+        // kepasang; kalau nggak, device jalanin skrip lawas selamanya.
+        if (ready(ctx) && !epochOk(ctx)) wipe(ctx);
         if (ready(ctx)) return;
         String asset = bundledName(ctx);
         if (asset == null) throw new Exception("rootfs tidak dibundle di APK");
@@ -105,6 +131,7 @@ public final class RootfsManager {
         if (sum != null && asset.equals(sum[1])) verify(pkg, sum[0], cb);
         extract(pkg, gzipped, d, cb);
         if (!marker(ctx).createNewFile()) throw new Exception("marker gagal");
+        writeEpoch(ctx);
         pkg.delete();
         if (cb != null) cb.on("done", 100);
     }

@@ -21,8 +21,12 @@ public final class StackSupervisor {
         return env;
     }
 
-    public static Map<String, String> envFor(int web, int api, int fpm) {
+    public static Map<String, String> envFor(int web, int api, int fpm, int tools) {
         Map<String, String> env = baseEnv();
+        env.put("PORT_WEB", String.valueOf(web));
+        env.put("PORT_API", String.valueOf(api));
+        env.put("PORT_FPM", String.valueOf(fpm));
+        env.put("TOOLS_PORT", String.valueOf(tools));
         env.put("PORT_WEB", String.valueOf(web));
         env.put("PORT_API", String.valueOf(api));
         env.put("PORT_FPM", String.valueOf(fpm));

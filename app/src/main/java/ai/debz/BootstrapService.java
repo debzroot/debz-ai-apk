@@ -33,7 +33,8 @@ public class BootstrapService extends Service {
             int web = PortManager.takePreferred(8091 + offset);
             int api = PortManager.takePreferred(8092 + offset);
             int fpm = PortManager.takePreferred(9000 + offset);
-            DebzConfig.setPorts(ctx, web, api);
+            int tools = PortManager.takePreferred(9191 + offset);
+            DebzConfig.setPorts(ctx, web, api, tools);
 
             String url = DebzConfig.rootfsUrl(ctx);
             String sha = ""; // TODO: isi dari OTA manifest
@@ -51,7 +52,7 @@ public class BootstrapService extends Service {
             if (RootfsManager.ready(ctx)) {
                 DebzConfig.setStatus(ctx, "starting-stack");
                 String out = StackSupervisor.start(ctx, RootfsManager.dir(ctx),
-                    StackSupervisor.envFor(web, api, fpm));
+                    StackSupervisor.envFor(web, api, fpm, tools));
                 boolean ok = StackSupervisor.healthy("http://127.0.0.1:" + web + "/");
                 if (!ok) saveStackLog(ctx, out);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");

@@ -24,6 +24,12 @@ echo "watchdog pid $!"
 # -D = jangan daemonize, tapi tetap & biar script lanjut ke nginx/opencode
 /usr/sbin/php-fpm8.3 -D -y /tmp/debz-phpfpm.conf >> "$R/logs/php-fpm-boot.log" 2>&1 &
 /usr/sbin/nginx -c /tmp/debz-nginx.conf
+# tool server backend.py (function_call/tools untuk agent + debz-term)
+if [ -f "$APP/backend.py" ]; then
+  TOOLS_PORT="${TOOLS_PORT:-9191}"
+  nohup python3 "$APP/backend.py" >> "$R/logs/tools.log" 2>&1 &
+  echo "tools pid $! port $TOOLS_PORT"
+fi
 if [ "${START_OPENCODE:-1}" = "1" ]; then
   mkdir -p "$APP/opencode-bin"
   if [ ! -f "$APP/opencode-bin/.serve_password" ]; then

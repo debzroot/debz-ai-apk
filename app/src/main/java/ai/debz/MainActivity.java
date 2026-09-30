@@ -18,6 +18,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.JavascriptInterface;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -33,6 +34,9 @@ public class MainActivity extends Activity {
     private TextView statusLine;
     private TextView infoLine;
     private ProgressBar bar;
+    private LinearLayout splash;
+    private ProgressBar splashBar;
+    private TextView splashStage;
     private Button permBtn;
     private Handler poll;
     private boolean webLoaded;
@@ -75,6 +79,31 @@ public class MainActivity extends Activity {
         bar.setMax(100);
         bar.setVisibility(View.GONE);
 
+        // splash: tampil selama stack naik, web disembunyikan sampai up.
+        // 100% = langsung buka chat, tanpa tap reload manual.
+        splash = new LinearLayout(this);
+        splash.setOrientation(LinearLayout.VERTICAL);
+        splash.setGravity(android.view.Gravity.CENTER);
+        int splashPad = dp(32);
+        splash.setPadding(splashPad, splashPad, splashPad, splashPad);
+        TextView splashTitle = new TextView(this);
+        splashTitle.setText("\uD83D\uDC7E Debz AI");
+        splashTitle.setTextSize(28);
+        splashTitle.setGravity(android.view.Gravity.CENTER);
+        splashStage = new TextView(this);
+        splashStage.setTextSize(14);
+        splashStage.setGravity(android.view.Gravity.CENTER);
+        splashStage.setPadding(0, dp(8), 0, dp(16));
+        splashBar = new ProgressBar(this, null,
+            android.R.attr.progressBarStyleHorizontal);
+        splashBar.setMax(100);
+        splashBar.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
+        splash.addView(splashTitle);
+        splash.addView(splashStage);
+        splash.addView(splashBar);
+
         infoLine = new TextView(this);
         infoLine.setTextSize(12);
 
@@ -87,20 +116,17 @@ public class MainActivity extends Activity {
         Button reloadBtn = new Button(this);
         reloadBtn.setText("Reload");
         reloadBtn.setOnClickListener(v -> loadBackend());
-        Button termBtn = new Button(this);
-        termBtn.setText("Terminal");
-        termBtn.setOnClickListener(v ->
-            startActivity(new Intent(this, TerminalActivity.class)));
         Button restartBtn = new Button(this);
         restartBtn.setText("Restart");
         restartBtn.setOnClickListener(v -> restartStack());
-        for (Button b : new Button[]{reloadBtn, termBtn, restartBtn}) {
+        for (Button b : new Button[]{reloadBtn, restartBtn}) {
             b.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             row.addView(b);
         }
 
         web = new WebView(this);
+        web.addJavascriptInterface(new AndroidBridge(), "DebzAndroid");
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
@@ -121,6 +147,9 @@ public class MainActivity extends Activity {
         root.addView(infoLine);
         root.addView(permBtn);
         root.addView(row);
+        root.addView(splash, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        web.setVisibility(View.GONE);
         root.addView(web, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         setContentView(root);
@@ -158,13 +187,19 @@ public class MainActivity extends Activity {
     private void updateStatus() {
         String raw = DebzConfig.status(this);
         int pct = progressOf(raw);
+        boolean up = "up".equals(raw);
         statusLine.setText(humanize(raw));
         dot.setTextColor(colorFor(raw));
+        splashStage.setText(humanize(raw));
         if (pct >= 0) {
-            bar.setVisibility(View.VISIBLE);
-            bar.setProgress(pct);
-        } else {
-            bar.setVisibility(View.GONE);
+            splashBar.setProgress(pct);
+        }
+        // belum up = splash loading; up = langsung chat, tanpa reload manual.
+        splash.setVisibility(up ? View.GONE : View.VISIBLE);
+        if (up && web.getVisibility() != View.VISIBLE) {
+            web.setVisibility(View.VISIBLE);
+        } else if (!up && web.getVisibility() == View.VISIBLE) {
+            web.setVisibility(View.GONE);
         }
         int webPort = DebzConfig.webPort(this);
         if (webPort <= 0) webPort = 8091 + DebzConfig.portOffset(this);
@@ -177,6 +212,15 @@ public class MainActivity extends Activity {
         if ("up".equals(raw) && !webLoaded) {
             webLoaded = true;
             loadBackend();
+        }
+    }
+
+    // dipanggil dari sidebar web (JS): buka terminal native.
+    private class AndroidBridge {
+        @JavascriptInterface
+        public void openTerminal() {
+            runOnUiThread(() ->
+                startActivity(new Intent(MainActivity.this, TerminalActivity.class)));
         }
     }
 
@@ -198,16 +242,18 @@ public class MainActivity extends Activity {
                 int apiPort = DebzConfig.apiPort(this);
                 if (apiPort <= 0) apiPort = 8092 + DebzConfig.portOffset(this);
                 int fpm = 9000 + DebzConfig.portOffset(this);
+                int tools = DebzConfig.toolsPort(this);
+                if (tools <= 0) tools = 9191 + DebzConfig.portOffset(this);
                 StackSupervisor.stop(this, RootfsManager.dir(this));
                 StackSupervisor.start(this, RootfsManager.dir(this),
-                    StackSupervisor.envFor(webPort, apiPort, fpm));
+                    StackSupervisor.envFor(webPort, apiPort, fpm, tools));
                 toast("stack direstart");
             } catch (Exception e) {
                 toast("restart gagal: " + e.getMessage());
             }
             runOnUiThread(() -> {
                 webLoaded = false;
-                loadBackend();
+                updateStatus();
             });
         }).start();
     }

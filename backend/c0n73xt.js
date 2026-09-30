@@ -22,6 +22,7 @@
     var sidebarCloseBtn = document.getElementById('sidebar-close');
     var sidebarBackdrop = document.getElementById('sidebar-backdrop');
     var newChatBtn = document.getElementById('new-chat-btn');
+    var androidTermBtn = document.getElementById('android-term-btn');
     var sessionListEl = document.getElementById('session-list');
     var sessionCountEl = document.getElementById('session-count');
 
@@ -528,6 +529,19 @@
     }
 
     if (exportBtn) exportBtn.addEventListener('click', exportChat);
+    // tombol Terminal HP: cuma nongol di dalam APK (JS bridge native).
+    // di browser biasa tetap hidden biar ga ada tombol mati.
+    if (androidTermBtn) {
+        if (window.DebzAndroid && window.DebzAndroid.openTerminal) {
+            androidTermBtn.hidden = false;
+            androidTermBtn.addEventListener('click', function() {
+                closeSidebar();
+                window.DebzAndroid.openTerminal();
+            });
+        } else {
+            androidTermBtn.remove();
+        }
+    }
     document.querySelectorAll('#export-btn, .export-btn').forEach(function(b) {
         if (b !== exportBtn) b.addEventListener('click', exportChat);
     });

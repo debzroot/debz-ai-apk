@@ -8,6 +8,7 @@ public final class DebzConfig {
     private static final String KEY_OFFSET = "port_offset";
     private static final String KEY_WEB = "port_web";
     private static final String KEY_API = "port_api";
+    private static final String KEY_TOOLS = "port_tools";
     private static final String KEY_ROOT = "mode_root";
     private static final String KEY_TOKEN = "gh_token";
     private static final String KEY_STATUS = "stack_status";
@@ -36,8 +37,13 @@ public final class DebzConfig {
         return prefs(ctx).getInt(KEY_API, -1);
     }
 
-    public static void setPorts(Context ctx, int web, int api) {
-        prefs(ctx).edit().putInt(KEY_WEB, web).putInt(KEY_API, api).apply();
+    public static void setPorts(Context ctx, int web, int api, int tools) {
+        prefs(ctx).edit().putInt(KEY_WEB, web).putInt(KEY_API, api)
+            .putInt(KEY_TOOLS, tools).apply();
+    }
+
+    public static int toolsPort(Context ctx) {
+        return prefs(ctx).getInt(KEY_TOOLS, -1);
     }
 
     public static boolean rootMode(Context ctx) {

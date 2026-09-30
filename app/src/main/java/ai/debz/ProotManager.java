@@ -65,6 +65,7 @@ public final class ProotManager {
 
     public static Process exec(Context ctx, File rootfs,
                                Map<String, String> env, String... cmd) throws Exception {
+        if (env == null) env = StackSupervisor.baseEnv();
         List<String> a = baseArgs(ctx, rootfs);
         a.add("/bin/sh");
         a.add("-c");

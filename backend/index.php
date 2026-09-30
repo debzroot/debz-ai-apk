@@ -227,6 +227,7 @@ function get_file_version ($path )
                 <button type="button" id="proxy-btn" class="st-btn" title="Proxy Manager — grab proxy fresh & route chat (bypass rate limit)"><span class="st-ico">🕵️</span><span class="st-lbl">Proxy</span></button>
                 <button type="button" id="export-btn" class="st-btn" title="Export Chat"><span class="st-ico">📤</span><span class="st-lbl">Export</span></button>
                 <button type="button" id="clear-btn" class="st-btn" title="Bersihin Chat Session Ini"><span class="st-ico">🧹</span><span class="st-lbl">Clear</span></button>
+                <button type="button" id="android-term-btn" class="st-btn" title="Terminal HP — shell proot" hidden><span class="st-ico">📟</span><span class="st-lbl">Terminal</span></button>
                 <a href="?logout=1" class="st-btn logout-btn" title="Keluar / Logout"><span class="st-ico">🚪</span><span class="st-lbl">Keluar</span></a>
             </div>
             <div class="sidebar-status" id="sidebar-status">Debz AI · Siap ✨</div>
