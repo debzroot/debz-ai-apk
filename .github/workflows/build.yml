@@ -46,13 +46,18 @@ jobs:
           WORK: ${{ github.workspace }}/.work-rootfs
           OUT: ${{ github.workspace }}/out
 
-      - name: Upload tarball
-        uses: actions/upload-artifact@v4
-        with:
-          name: rootfs-mini
-          path: |
-            out/rootfs-mini.tar.gz
-            out/SHA256SUMS
+      # Artefak Actions kuotanya kecil & recalc 6-12 jam — handoff antar job
+      # + distribusi APK lewat Release rolling ci-latest (overwrite tiap run).
+      - name: Upload tarball ke Release ci-latest
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view ci-latest >/dev/null 2>&1 || gh release create ci-latest \
+            --title "CI latest (rolling)" \
+            --notes "Build otomatis tiap push main. Asset di-overwrite tiap run sukses." \
+            --prerelease
+          gh release upload ci-latest --clobber out/rootfs-mini.tar.gz out/SHA256SUMS
 
       - name: GitHub Release
         if: inputs.release_tag != ''
@@ -128,10 +133,13 @@ jobs:
           ls -la app/src/main/jniLibs/arm64-v8a/
 
       - name: Bundle rootfs-mini ke assets (install langsung jalan)
-        uses: actions/download-artifact@v4
-        with:
-          name: rootfs-mini
-          path: app/src/main/assets/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p app/src/main/assets
+          gh release download ci-latest -p 'rootfs-mini.tar.gz' -p 'SHA256SUMS' \
+            -D app/src/main/assets/ --clobber
+          ls -la app/src/main/assets/rootfs-mini.tar.gz app/src/main/assets/SHA256SUMS
 
       - name: Cek assets
         run: ls -la app/src/main/assets/
@@ -161,8 +169,11 @@ jobs:
           APK_VCODE: ${{ github.run_number }}
         run: gradle :app:assembleRelease --no-daemon --max-workers=1
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: debz-ai-apk
-          path: app/build/outputs/apk/release/app-release.apk
+      - name: Upload APK ke Release ci-latest
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          ls -la "$APK"
+          gh release upload ci-latest --clobber "$APK"
