@@ -18,6 +18,8 @@ public final class StackSupervisor {
         // tool rootfs (mkdir/sed/pkill/php/...) — PATH bawaan app Android
         // (/system/bin/...) tak ada di proot -> command not found semua.
         env.put("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+        // HOME kosong = bun/opencode crash (uv_os_homedir ENOENT).
+        env.put("HOME", "/root");
         return env;
     }
 
