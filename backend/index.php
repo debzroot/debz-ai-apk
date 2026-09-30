@@ -287,6 +287,98 @@ function get_file_version ($path )
             <div class="settings-body">
                 <div id="settings-providers"></div>
                 <button type="button" class="settings-add" id="settings-add">+ Tambah Provider</button>
+                <div id="mp-box" style="margin-top:14px;border-top:1px solid var(--ink);padding-top:10px;">
+                    <div style="font-weight:700;margin-bottom:6px;">🌐 Proxy Manual (HP)</div>
+                    <div style="font-size:11.5px;color:var(--txt-dim);line-height:1.5;margin-bottom:8px;">HP tidak punya proxy-grabber — kalau internet langsung ke provider diblokir, isi proxy manual di sini. Dikosongkan = direct.</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                        <select id="mp-type" style="flex:1;min-width:90px;">
+                            <option value="http">http</option>
+                            <option value="socks5">socks5</option>
+                            <option value="socks4">socks4</option>
+                        </select>
+                        <input id="mp-host" placeholder="host / IP proxy" autocomplete="off" style="flex:2;min-width:130px;" />
+                        <input id="mp-port" placeholder="port" inputmode="numeric" autocomplete="off" style="flex:1;min-width:70px;" />
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                        <input id="mp-user" placeholder="user (opsional)" autocomplete="off" style="flex:1;min-width:100px;" />
+                        <input id="mp-pass" type="password" placeholder="pass (opsional)" autocomplete="off" style="flex:1;min-width:100px;" />
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                        <button type="button" id="mp-save">💾 Simpan &amp; Tes</button>
+                        <button type="button" id="mp-clear">🗑️ Hapus</button>
+                        <span id="mp-status" style="font-size:12px;"></span>
+                    </div>
+                </div>
+                <script>
+                (function(){
+                    var box = document.getElementById('mp-box');
+                    if (!box) return;
+                    function $(id){ return document.getElementById(id); }
+                    function paint(d){
+                        var st = $('mp-status');
+                        if (!d || d.set === false) {
+                            st.style.color = '';
+                            st.textContent = 'Mode: direct (tanpa proxy)';
+                            return;
+                        }
+                        if (d.live) {
+                            st.style.color = 'var(--green)';
+                            st.textContent = '● LIVE ' + d.type + '://' + d.host + ':' + d.port;
+                        } else {
+                            st.style.color = 'var(--red)';
+                            st.textContent = '● MATI (' + (d.probe || '?') + ') ' + (d.message || '');
+                        }
+                    }
+                    function load(){
+                        fetch('api.php?action=manual_proxy', {cache:'no-store'})
+                            .then(function(r){ return r.json(); })
+                            .then(function(d){
+                                if (d && d.set) {
+                                    $('mp-type').value = d.type || 'http';
+                                    $('mp-host').value = d.host || '';
+                                    $('mp-port').value = d.port || '';
+                                    $('mp-user').value = '';
+                                    $('mp-pass').value = '';
+                                    $('mp-pass').placeholder = d.has_auth ? '******** (tersimpan)' : 'pass (opsional)';
+                                }
+                                paint(d);
+                            })
+                            .catch(function(){ $('mp-status').textContent = 'gagal baca status proxy'; });
+                    }
+                    $('mp-save').onclick = function(){
+                        $('mp-status').textContent = 'mengetes…';
+                        fetch('api.php?action=manual_proxy', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({
+                                type: $('mp-type').value,
+                                host: $('mp-host').value,
+                                port: $('mp-port').value,
+                                user: $('mp-user').value,
+                                pass: $('mp-pass').value
+                            })
+                        }).then(function(r){ return r.json(); })
+                          .then(function(d){
+                              if (!d.success) { $('mp-status').style.color = 'var(--red)'; $('mp-status').textContent = d.error || 'gagal simpan'; return; }
+                              load();
+                              if (window.showToast) window.showToast(d.message || 'proxy tersimpan');
+                          })
+                          .catch(function(){ $('mp-status').textContent = 'gagal simpan proxy'; });
+                    };
+                    $('mp-clear').onclick = function(){
+                        fetch('api.php?action=manual_proxy', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({op:'clear'})
+                        }).then(function(r){ return r.json(); })
+                          .then(function(){ $('mp-host').value=''; $('mp-port').value=''; $('mp-user').value=''; $('mp-pass').value=''; load(); })
+                          .catch(function(){ $('mp-status').textContent = 'gagal hapus proxy'; });
+                    };
+                    var sb = document.getElementById('settings-btn');
+                    if (sb) sb.addEventListener('click', load);
+                    load();
+                })();
+                </script>
             </div>
         </div>
 

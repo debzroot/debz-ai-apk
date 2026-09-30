@@ -748,14 +748,21 @@ function debz_cli_proxy_pick(): array {
         if($pk['usedType']!== '')$usedType = $pk['usedType'];
     }
     if($proxy === '') {
-        $waitSec = max(10,(int)getenv('AI_PROXY_POOL_WAIT')?: 120);
-        if(function_exists('termEmit'))termEmit('warn','⚠️ Pool proxy kosong / gak ada yang live. Nunggu proxy-grabber, NO direct...');
-        if(function_exists('applog'))applog('PROXY','cli_pool_empty_wait',['type' => $type,'wait_sec' => $waitSec]);
-        if(debz_proxy_wait_pool($type,$waitSec)) {
-            unset($GLOBALS['_debz_proxy_tried_round']);
-            $pk2 = debz_proxy_pick_live($type,true);
-            $proxy = $pk2['proxy'];
-            if($pk2['usedType']!== '')$usedType = $pk2['usedType'];
+        // Tanpa grabber (khas APK: proxy-grabber/ tidak dibundle), nunggu
+        // pool 120 detik = gantung sia-sia. Langsung abort jujur.
+        $hasGrabber = is_file(__DIR__.'/proxy-grabber/proxy_grabber.py');
+        $waitSec = $hasGrabber? max(10,(int)getenv('AI_PROXY_POOL_WAIT')?: 120): 0;
+        if($waitSec > 0) {
+            if(function_exists('termEmit'))termEmit('warn','⚠️ Pool proxy kosong / gak ada yang live. Nunggu proxy-grabber, NO direct...');
+            if(function_exists('applog'))applog('PROXY','cli_pool_empty_wait',['type' => $type,'wait_sec' => $waitSec]);
+            if(debz_proxy_wait_pool($type,$waitSec)) {
+                unset($GLOBALS['_debz_proxy_tried_round']);
+                $pk2 = debz_proxy_pick_live($type,true);
+                $proxy = $pk2['proxy'];
+                if($pk2['usedType']!== '')$usedType = $pk2['usedType'];
+            }
+        } elseif(function_exists('applog')) {
+            applog('PROXY','cli_pool_empty_nograbber',['type' => $type]);
         }
     }
     if($proxy === '') {
