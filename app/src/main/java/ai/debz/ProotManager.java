@@ -103,7 +103,7 @@ public final class ProotManager {
     }
 
     // loader proot (lihat atas): dari assets ke files/bin, sekali aja
-    private static void ensureLoader(Context ctx, File libDir) {
+    private static void ensureLoader(Context ctx, File libDir) throws Exception {
         String[] assets = ctx.getAssets().list("");
         if (assets == null) return;
         for (String name : assets) {
