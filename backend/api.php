@@ -1049,9 +1049,10 @@ if(! $hasImages && $userMessage !== '') {
             if((time()- $runStartedAt)> 1800) {
                 finishRunStream($ch,$mh,'Run melebihi 30 menit — dibatalkan biar server tetep sehat.');
             }
-            if($running > 0 && ! $doneSent &&(time()- $lastKa)>= 15) {
+            if($running > 0 && ! $doneSent &&(time()- $lastKa)>= 10) {
                 $lastKa = time();
                 echo ": ka\n\n";
+                if(function_exists('ob_flush'))@ob_flush();
                 flush();
             }
         }while($running > 0);
@@ -1123,6 +1124,7 @@ function processUpstreamBlock($block) {
             $dataJson .= trim(substr($ln,5));
         }elseif($ln !== '' && $ln[0]=== ':') {
             echo ": ka\n\n";
+            if(function_exists('ob_flush'))@ob_flush();
             flush();
         }
     }
@@ -1265,9 +1267,10 @@ function fallbackClientIsGone() {
     if((time()- $runStartedAt)> 1800) {
         finishFallbackStream($ch,$mh,'Run melebihi 30 menit — dibatalkan biar server tetep sehat.');
     }
-    if($running > 0 && ! $doneSent &&(time()- $lastKa)>= 15) {
+    if($running > 0 && ! $doneSent &&(time()- $lastKa)>= 10) {
         $lastKa = time();
         echo ": ka\n\n";
+        if(function_exists('ob_flush'))@ob_flush();
         flush();
     }
 }while($running > 0);

@@ -1290,6 +1290,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         $sawContent = false;
         $textEmitted = false;
         $lastBeat = time();
+        $lastDataBeat = time();
         $t0 = time();
         $cliDeadline = $t0 + 900;
         $hardCap = $t0 + 1800;
@@ -1456,9 +1457,13 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 break;
             }
             if(! $status['running'])break;
-            if((time()- $lastBeat)>= 20) {
+            if((time()- $lastBeat)>= 10) {
                 $lastBeat = time();
                 native_heartbeat();
+            }
+            if((time()- $lastDataBeat)>= 45 && (time()- $lastProgressTs)>= 45) {
+                $lastDataBeat = time();
+                if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking']);
             }
             if($cliProxy === '' && ! $cliProxyHang &&(time()- $lastProgressTs)> 240) {
                 $cliProxyHang = true;
@@ -1603,6 +1608,7 @@ function native_clean_rd(array $items): array {
 function native_heartbeat(): void {
     if(function_exists('emit')) {
         echo ": ka\n\n";
+        if(function_exists('ob_flush'))@ob_flush();
         if(function_exists('flush'))flush();
     }
 }

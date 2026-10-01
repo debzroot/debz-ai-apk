@@ -2300,7 +2300,7 @@
             if (stA && stA.busy) {
                 var stAge = Date.now() - (stA.t0 || Date.now());
                 if (stAge > 180000) {
-                    try { if (stA.abort) stA.abort.abort(); } catch(e2) {}
+                    try { stA.userAborted = true; if (stA.abort) stA.abort.abort(); } catch(e2) {}
                     delete sessionStreams[activeSessionId];
                     setBusy(false);
                     hideProgressIfIdle();
@@ -2524,9 +2524,29 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 if (mySessionId === activeSessionId) { showProgress('🤔', 'Mikir dulu...'); startElapsed(); }
                 startKeepaliveBeacon();
 
+                // Idle watchdog: bedain "sunyi tapi koneksi hidup" vs "putus".
+                // Tiap byte (termasuk ': ka') = bukti koneksi hidup.
+                var lastByteTs = Date.now();
+                var idleTimer = setInterval(function() {
+                    if (mySessionId !== activeSessionId || doneReceived) return;
+                    var idleS = Math.floor((Date.now() - lastByteTs) / 1000);
+                    if (idleS >= 30) {
+                        showProgress('⏳', 'Masih kerja · ' + idleS + 's tanpa update (koneksi hidup)');
+                    }
+                    // Sunyi >120s padahal server harusnya kirim heartbeat/10s
+                    // = koneksi mati suri. Kalau ada run_id (gateway), putus
+                    // paksa biar jatuh ke resume otomatis. Jalur CLI (tanpa
+                    // run_id) JANGAN di-abort — backend ikut mati.
+                    if (idleS >= 120 && currentStreamRunId) {
+                        clearInterval(idleTimer);
+                        try { abortController.abort(); } catch(e) {}
+                    }
+                }, 5000);
+
                 while (true) {
                     var result = await reader.read();
                     if (result.done) break;
+                    lastByteTs = Date.now();
 
                     buffer += decoder.decode(result.value, { stream: true });
                     var lines = buffer.split('\n');
@@ -2654,6 +2674,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 // Stream berakhir TANPA [DONE] → kemungkinan koneksi beneran putus.
                 // Kalau kita punya run_id, resume via polling status — bukan drama "gak ada balesan".
                 if (!doneReceived && currentStreamRunId) {
+                    try { clearInterval(idleTimer); } catch(e) {}
                     var resumed = await resumeFromRunStatus();
                     if (resumed) {
                         abortController = null;
@@ -2699,7 +2720,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 if (window.__clientLog) window.__clientLog('error', 'stream error: ' + (err && err.message ? err.message : String(err)), { name: err && err.name ? err.name : '' });
                 stopElapsed();
                 var errDetail = err.message ? err.message : String(err);
-                if (err.name === 'AbortError') {
+                if (err.name === 'AbortError' && myStream.userAborted) {
                     termLog('info', '⏹ stream dibatalkan user');
                     // Session udah pindah? Jangan nulis ke session baru (guard mySessionId)
                     if (mySessionId === activeSessionId) {
@@ -2719,6 +2740,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 } else {
                     // Network error di tengah stream? Coba resume via run_status dulu
                     if (currentStreamRunId && mySessionId === activeSessionId) {
+                        try { clearInterval(idleTimer); } catch(e) {}
                         var resumedErr = await resumeFromRunStatus('Koneksi error — resume otomatis...');
                         if (resumedErr) {
                             abortController = null;
@@ -2730,7 +2752,9 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     }
                     if (mySessionId === activeSessionId) {
                         var errBase = fullContent || SR.text();
-                        var errText = errBase ? errBase + '\n\n⚠️ Error: ' + errDetail : '⚠️ Error: ' + errDetail;
+                        var isNetAbort = /abort|bodyStream|network|fetch|load failed/i.test(errDetail || '');
+                        var friendlyErr = isNetAbort ? 'Koneksi kepotong padahal agent masih jalan — kirim ulang / tekan Regen untuk lanjut.' : errDetail;
+                        var errText = errBase ? errBase + '\n\n⚠️ ' + friendlyErr : '⚠️ Error: ' + friendlyErr;
                         SR.flush(errText, rdItems || [], placeholder.querySelector('.msg-text'));
                         SR.stop();
                         if (approvalCards.length) {
@@ -2747,6 +2771,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 }
                 if (mySessionId === activeSessionId) hideProgress();
             } finally {
+                try { clearInterval(idleTimer); } catch(e) {}
                 if (mySessionId === activeSessionId) SR.stop();
                 actStreamEnd(myStream);
                 if (!actHistories) { var actHistories = {}; } // historyLintasStream (persisten stlh stream selesai)
@@ -2779,6 +2804,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
             var st = sessionStreams[activeSessionId];
             if (st && st.abort) {
                 e.preventDefault();
+                st.userAborted = true;
                 st.abort.abort();
             }
         });
