@@ -16,15 +16,3 @@
     "Awal sesi: baca AGENTS.md, lalu ambil memori notes.db keys bootstrap,map-apk,rules-core-ai,tools-cheatsheet via MCP debz atau /api/note. Jangan glob/grep buta. Bedakan shell proot (/api/exec) vs root Android (/api/android via bridge 8098)."
   ]
 }
-// Debz AI — config opencode TERISOLASI.
-// Wajib dipakai oleh debz-term.py & webui (env XDG_CONFIG_HOME/XDG_DATA_HOME
-// diarahkan ke opencode-bin/.cfg_home & .data_home). Jangan dihapus.
-//
-// permission "ask" = tiap aksi bash/edit minta approve dari client.
-// - Client yang masih pakai `--auto` (mode tools ON) TETAP jalan otomatis
-//   (flag CLI menimpa config) → jalur debz-term/webui sekarang gak break.
-// - Client tanpa `--auto` (mode approval aktif) → event `permission.asked`
-//   nempel di server, dijawab via `POST /session/:id/permissions/:id`.
-//
-// CATATAN: verified 2026-09-22 — format object ini diterima parser (tes
-// throwaway OK, gak ada error invalid-config).
