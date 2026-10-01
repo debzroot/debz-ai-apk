@@ -16,7 +16,14 @@ android {
     defaultConfig {
         applicationId = "ai.debz"
         minSdk = 26
-        targetSdk = 34
+        // JANGAN naikkan ke 29+: targetSdk 29+ = domain untrusted_app
+        // TANPA execute ke app_data_file (W^X, dontaudit-silent) ->
+        // execve loader proot + semua binary rootfs EACCES -> stack-fail
+        // abadi tiap boot (verified di HP Infinix X6725C, 2026-10-01:
+        // untrusted_app cuma {read map open...}, tanpa execute;
+        // untrusted_app_27 (targetSdk 26-28) masih boleh execute).
+        // 28 = batas atas yang aman, sama kayak Termux. compileSdk tetap 34.
+        targetSdk = 28
         // CI isi via env biar tiap build keidentifikasi (sidebar device
         // info + cegah salah-install artefak lawas). Default = dev lokal.
         versionCode = (System.getenv("APK_VCODE") ?: "2").toInteger()
