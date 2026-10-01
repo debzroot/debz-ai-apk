@@ -1305,7 +1305,7 @@
     function actStepEl(item) {
         var el = document.createElement('div');
         el.className = 'act-step';
-        el.textContent = '▶ Langkah ' + item.n;
+        el.textContent = '🚚💨💨 Di Proses ' + item.n;
         return el;
     }
 

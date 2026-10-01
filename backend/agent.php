@@ -1347,7 +1347,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                         if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking','iter' => $it + 1]);
                         $thinkingSent = true;
                     }
-                    if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => '▶ Langkah '.((int)$it + 1)]);
+                    if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => '🚚💨💨 Di Proses '.((int)$it + 1)]);
                     if(function_exists('emit'))emit(['type' => 'step','n' =>((int)$it + 1)]);
                     $stepCount ++;
                     $touchProgress();

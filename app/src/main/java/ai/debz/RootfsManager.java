@@ -23,7 +23,8 @@ public final class RootfsManager {
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
     // 16 = WebChromeClient confirm + android bridge root + tool android.
     // 17 = AGENTS.md canonical + opencode instructions + notes auto-seed (agent no-search) + browser http-fallback mirror HP.
-    private static final int ROOTFS_EPOCH = 17;
+    // 18 = PROXY-FREE total (proxy-grabber dihapus) + label term 🚚💨💨 Di Proses + AllowAll auto fix.
+    private static final int ROOTFS_EPOCH = 18;
 
     public interface Progress {
         void on(String stage, int percent);

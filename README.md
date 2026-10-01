@@ -35,6 +35,7 @@ tanpa perlu VPS atau API key mahal.
 - **Failover seperti 9Router (PROXY-FREE)**
   - Provider chain + circuit breaker + retry ber-backoff, semua request direct.
   - Failover saat 5xx / timeout / limit / stall, auto-handoff sesi berat.
+  - Fitur proxy pool / proxy-grabber sudah dihapus total — tidak ada lagi opsi proxy di UI maupun backend.
 - **Tools lengkap** (22 via `backend.py`): exec, fs read/write/list/search, http,
   download, db, archive, ps/kill, skill, note (memori `notes.db`), pkg, web_search,
   backup, scheduler (cron), computer_use, browser, screenshot, rag.
