@@ -45,7 +45,11 @@ if alive_watchdog; then
 fi
 
 # --- bersihkan sisa stack mati, cuma yang conf miliknya kita -------------
-pkill -f "php-fpm8.3.*debz-phpfpm" 2>/dev/null || true
+# Pola php-fpm WAJIB "php-fpm.*debz-phpfpm", bukan "php-fpm8.3.*...": cmdline
+# master aslinya "php-fpm: master process (/tmp/debz-phpfpm.conf)" — tidak ada
+# string "php-fpm8.3" di sana, jadi pola lama tidak pernah cocok dan tiap
+# restart bocorin satu master baru (pernah 5 master hidup bareng).
+pkill -f "php-fpm.*debz-phpfpm" 2>/dev/null || true
 pkill -f "nginx.*debz-nginx" 2>/dev/null || true
 pkill -f "backend\.py" 2>/dev/null || true
 pkill -f "opencode serve" 2>/dev/null || true
@@ -74,8 +78,22 @@ spawn "$LOG/nginx-boot.log" /usr/sbin/nginx -c /tmp/debz-nginx.conf -g "daemon o
 
 # tool server backend.py (function_call/tools untuk agent + debz-term)
 if [ -f "$APP/backend.py" ]; then
-  spawn "$LOG/tools.log" python3 "$APP/backend.py"
-  echo "tools launched port $TOOLS_PORT"
+  # Gate pydeps. DEX punya firstBootLog + first-boot-pip.sh sendiri, tapi itu
+  # hanya jalan kalau gate di sisi Java benar-benar terpicu. Kalau tidak (mis.
+  # app di-upgrade, atau marker hilang karena rootfs di-refresh), backend.py
+  # langsung crash "No module named requests" dan 22 tool mati sampai app
+  # ditutup & dibuka ulang. Cek di sini supaya selesai sekali di sini: cepat
+  # kalau marker sudah ada, dan memperbaiki kalau belum.
+  if [ ! -f "$R/.pydeps-done" ]; then
+    echo "pydeps marker hilang, jalankan first-boot-pip.sh"
+    sh "$R/first-boot-pip.sh" >> "$LOG/firstboot.log" 2>&1 </dev/null || true
+  fi
+  if [ -f "$R/.pydeps-done" ]; then
+    spawn "$LOG/tools.log" python3 "$APP/backend.py"
+    echo "tools launched port $TOOLS_PORT"
+  else
+    echo "tools SKIP: first-boot-pip.sh gagal, cek $LOG/firstboot.log" >&2
+  fi
 fi
 
 if [ "${START_OPENCODE:-1}" = "1" ]; then
