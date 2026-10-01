@@ -188,6 +188,52 @@
         setTimeout(function() { t.classList.remove('show'); }, duration);
     }
 
+    // Modal konfirmasi sendiri (tanpa confirm() bawaan): WebView APK tanpa
+    // WebChromeClient bikin confirm() mati diam-diam (return false) -> hapus
+    // sesi/clear/compact ga bisa. Ini jalan di semua WebView.
+    function debzConfirm(msg, okLabel, cb) {
+        if (typeof cb !== 'function') { cb = okLabel; okLabel = 'Ya'; }
+        var old = document.getElementById('debz-confirm');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+        var ov = document.createElement('div');
+        ov.id = 'debz-confirm';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);padding:20px;box-sizing:border-box;';
+        var box = document.createElement('div');
+        box.style.cssText = 'max-width:340px;width:100%;background:#1d1f24;border:2px solid #000;border-radius:12px;padding:18px;color:#e2e4e9;font-size:13.5px;line-height:1.5;box-shadow:4px 4px 0 #000;';
+        var p = document.createElement('div');
+        p.textContent = msg;
+        p.style.marginBottom = '14px';
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+        var bNo = document.createElement('button');
+        bNo.type = 'button';
+        bNo.textContent = 'Batal';
+        bNo.style.cssText = 'background:transparent;border:2px solid #555;color:#aaa;padding:8px 16px;border-radius:10px;font-size:13px;cursor:pointer;';
+        var bYes = document.createElement('button');
+        bYes.type = 'button';
+        bYes.textContent = okLabel || 'Ya';
+        bYes.style.cssText = 'background:#4ade80;border:2px solid #000;color:#06270f;padding:8px 16px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:2px 2px 0 #000;';
+        function done(v) {
+            if (ov.parentNode) ov.parentNode.removeChild(ov);
+            document.removeEventListener('keydown', onKey, true);
+            cb(!!v);
+        }
+        function onKey(e) {
+            if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+        }
+        bNo.addEventListener('click', function() { done(false); });
+        bYes.addEventListener('click', function() { done(true); });
+        ov.addEventListener('click', function(e) { if (e.target === ov) done(false); });
+        document.addEventListener('keydown', onKey, true);
+        row.appendChild(bNo);
+        row.appendChild(bYes);
+        box.appendChild(p);
+        box.appendChild(row);
+        ov.appendChild(box);
+        document.body.appendChild(ov);
+        try { bNo.focus(); } catch(e) {}
+    }
+
     function cleanTitle(text) {
         var t = stripAttachPreview(text)
             .replace(/<[^>]+>/g, ' ')
@@ -477,9 +523,14 @@
             if (id === activeSessionId) { setBusy(false); hideProgressIfIdle(); }
             showToast('Stream aktif di-stop, sesi dihapus');
         }
-        var cf = true;
-        try { cf = confirm('Hapus session "' + s.title + '"? Semua chat di dalamnya bakal ilang permanen.'); } catch(e3) { cf = true; }
-        if (!cf) return;
+        debzConfirm('Hapus session "' + s.title + '"? Semua chat di dalamnya bakal ilang permanen.', 'Hapus', function(ok) {
+            if (ok) doDeleteSession(id);
+        });
+    }
+
+    function doDeleteSession(id) {
+        var s = getSession(id);
+        if (!s) return;
         var wasActive = (id === activeSessionId);
         sessions = sessions.filter(function(x) { return x.id !== id; });
         if (wasActive) {
@@ -606,9 +657,9 @@
                 setBusy(false);
                 hideProgressIfIdle();
             }
-            var cf = true;
-            try { cf = confirm('Yakin mau hapus semua chat di session ini?'); } catch(e3) { cf = true; }
-            if (cf) clearAllChats();
+            debzConfirm('Yakin mau hapus semua chat di session ini?', 'Hapus', function(ok) {
+                if (ok) clearAllChats();
+            });
         });
     });
 
@@ -3210,14 +3261,16 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
 
             if (act === 'del') {
                 var pname = providerData && providerData.providers[id] ? providerData.providers[id].name : id;
-                if (!confirm('Hapus provider "' + pname + '"?')) return;
-                fetch(API_URL + '?action=providers', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ op: 'delete', id: id })
-                }).then(function(r) { return r.json(); }).then(function(d) {
-                    if (d.success) { showToast('🗑️ Provider dihapus'); renderSettingsProviders(); fetchProviders(refreshProviderUI); }
-                    else showToast('❌ ' + (d.error || 'gagal'));
-                }).catch(function() { showToast('❌ gagal'); });
+                debzConfirm('Hapus provider "' + pname + '"?', 'Hapus', function(ok) {
+                    if (!ok) return;
+                    fetch(API_URL + '?action=providers', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ op: 'delete', id: id })
+                    }).then(function(r) { return r.json(); }).then(function(d) {
+                        if (d.success) { showToast('🗑️ Provider dihapus'); renderSettingsProviders(); fetchProviders(refreshProviderUI); }
+                        else showToast('❌ ' + (d.error || 'gagal'));
+                    }).catch(function() { showToast('❌ gagal'); });
+                });
                 return;
             }
             if (act === 'edit') {
@@ -3512,7 +3565,13 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 showToast('Chat masih dikit — gak ada yang perlu di-compact 😄');
                 return;
             }
-            if (!confirm('Compact context? Chat di session ini diringkas jadi summary — hemat token, lanjut ngobrol dari situ.')) return;
+            debzConfirm('Compact context? Chat di session ini diringkas jadi summary — hemat token, lanjut ngobrol dari situ.', 'Compact', function(ok) {
+                if (ok) doCompact(s);
+            });
+        });
+    }
+
+    function doCompact(s) {
             compactBtn.disabled = true;
             compactBtn.textContent = '⏳';
             fetch(API_URL + '?action=compact', {
@@ -3534,7 +3593,6 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 compactBtn.textContent = 'Compact';
                 showToast('❌ Compact gagal (network)', 3000);
             });
-        });
     }
 
     // Init: load providers pertama kali
