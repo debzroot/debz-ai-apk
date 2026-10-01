@@ -1470,7 +1470,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
     if(function_exists('applog'))applog('AGENT','MAX_ITER tercapai',['iter' => $MAX_ITER]);
     if(function_exists('emitDone'))emitDone();
 }
-function native_agent_run_opencode_card(array $P,string $model,string $userText,string $openSession,string $mapFile,string $threadId,array $serveCfg,string $bin,bool $allowSessionIn = false,array $attachFiles = []): void {
+function native_agent_run_opencode_card(array $P,string $model,string $userText,string $openSession,string $mapFile,string $threadId,array $serveCfg,string $bin,bool $allowSessionIn = false,array $attachFiles = [],array $messagesIn = []): void {
     @ set_time_limit(0);
     global $emittedAnything,$doneSent;
     if(function_exists('applog'))applog('OPENCODE_CARD','start',['model' => $model,'thread' => substr($threadId,0,40),'user_len' => strlen($userText),'files' => count($attachFiles)]);
@@ -1478,6 +1478,22 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Kartu approval butuh binary curl + php-curl** yang tak ada di rootfs lama. Update APK, atau nyalakan Tools (pakai jalur run langsung).\n"]]]]);
         if(function_exists('emitDone'))emitDone();
         return;
+    }
+    $ocTurns = oc_thread_bump($threadId,$openSession);
+    if($ocTurns === 16)oc_emit_handoff($threadId,$ocTurns,'mulai penuh');
+    elseif($ocTurns === 24)oc_emit_handoff($threadId,$ocTurns,'berat, rawan socket putus');
+    elseif($ocTurns > 24 && ($ocTurns% 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
+    // AUTO-ROTATE card: serve session berat di-fresh-kan. Konteks kartu cuma
+    // hidup di serve, jadi summary WAJIB ditempel ke pesan pertama.
+    if($ocTurns >= 20 && $openSession !== '') {
+        $resumePack = oc_auto_handoff_summary($P,$messagesIn);
+        if($mapFile !== '')@ unlink($mapFile);
+        $openSession = '';
+        if($resumePack !== '')$userText = $resumePack."\n\nPESAN BARU:\n".$userText;
+        oc_emit_handoff($threadId,$ocTurns,'auto-rotate serve fresh, konteks terakhir dibawa','handoff_rotated');
+        if(function_exists('termEmit'))termEmit('info','🧬 Auto-handoff: serve session di-fresh-kan. Lanjut!');
+        if(function_exists('applog'))applog('OPENCODE_CARD','auto_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'summary' => $resumePack !== ''? strlen($resumePack): 0]);
+        $ocTurns = oc_thread_bump($threadId,'');
     }
     $serverUrl = rtrim((string)($serveCfg['url']?? ''),'/');
     if($serverUrl === '')$serverUrl = 'http://127.0.0.1:'.(int)($serveCfg['port']?? 4096);
@@ -1818,6 +1834,49 @@ function debz_chat_images_save(array $filesInfo,int $maxFiles = 5,int $maxBytes 
     if(function_exists('media_prune'))media_prune($mediaDir);
     return $out;
 }
+function oc_thread_meta_file(string $threadId): string {
+    return sys_get_temp_dir().'/c0n73xt_oc_meta_'.md5($threadId).'.json';
+}
+function oc_thread_bump(string $threadId,string $openSession): int {
+    if($threadId === '')return 0;
+    $f = oc_thread_meta_file($threadId);
+    $m = is_file($f)? @ json_decode((string)@ file_get_contents($f),true): [];
+    if(! is_array($m))$m = [];
+    if(($m['sid']?? '')!== $openSession && $openSession !== '') {
+        $m['turns'] = 0;
+        $m['sid'] = $openSession;
+    }
+    $m['turns'] = ((int)($m['turns']?? 0))+ 1;
+    $m['updated'] = date('c');
+    if($openSession !== '')$m['sid'] = $openSession;
+    @ file_put_contents($f,json_encode($m),LOCK_EX);
+    return (int)$m['turns'];
+}
+function oc_resume_cmd(string $threadId,int $turns): string {
+    $short = substr($threadId,0,8);
+    return 'Lanjutin dari sesi '.$short.' ('.$turns.' pesan): baca HANDOFF terakhir + git status + git diff --stat dulu, terus kerjain sisa TODO tanpa ngulang yang udah beres.';
+}
+function oc_emit_handoff(string $threadId,int $turns,string $reason,string $type = 'handoff_reminder'): void {
+    if(! function_exists('emit')|| $threadId === '')return;
+    emit(['type' => $type,'thread_id' => $threadId,'turns' => $turns,'reason' => $reason,'resume_cmd' => oc_resume_cmd($threadId,$turns)]);
+    if(function_exists('termEmit'))termEmit('warn','🧬 Sesi '.$turns.'x chat ('.$reason.') — auto-handoff jaga biar awet.');
+}
+function oc_auto_handoff_summary(array $P,array $messagesIn): string {
+    // Bawa konteks terakhir sebagai teks (tanpa LLM tambahan): endpoint HTTP
+    // zen geo-block dari HP (403), jadi ringkasan LLM tak bisa diandalkan.
+    // Rotasi tetap nyambung via 6 pesan terakhir + instruksi lanjut.
+    $take = array_slice($messagesIn,-6);
+    $lines = [];
+    foreach($take as $mH) {
+        if(! is_array($mH))continue;
+        $rH = ($mH['role']?? '')=== 'user'? 'LU': 'DEBZ';
+        $cH = trim(strip_tags((string)($mH['content']?? '')));
+        if($cH === '')continue;
+        $lines[]= $rH.': '.mb_substr(preg_replace('/\s+/',' ',$cH),0,800);
+    }
+    if(! $lines)return '';
+    return "Konteks sesi sebelumnya (sesi CLI di-fresh-kan, lanjutkan tanpa ngulang):\n".implode("\n",$lines)."\nBaca git status + git diff --stat dulu bila relevan, terus kerjain sisa TODO.";
+}
 function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens,string $userText,string $threadId = '',bool $toolsOn = true,bool $allowSessionIn = false,array $attachFiles = []): void {
     @ set_time_limit(0);
     global $emittedAnything,$doneSent;
@@ -1837,6 +1896,23 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     }
     if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking']);
     if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => '🚀 opencode-cli ('.$bin.') · model '.$model.($openSession !== ''? ' · lanjut session '.substr($openSession,0,12).'…': ' · session baru').($toolsOn? ' · ⚡ tools auto': ' · tools off').(count($attachFiles)? ' · 📎 '.count($attachFiles).' file': '')]);
+    $ocTurns = oc_thread_bump($threadId,$openSession);
+    if($ocTurns === 16)oc_emit_handoff($threadId,$ocTurns,'mulai penuh');
+    elseif($ocTurns === 24)oc_emit_handoff($threadId,$ocTurns,'berat, rawan socket putus');
+    elseif($ocTurns > 24 && ($ocTurns% 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
+    // AUTO-ROTATE: sesi CLI berat (>=20 turn) di-reset fresh + summary dibawa
+    // sebagai konteks. UI tetap sesi yang sama — user tinggal lanjut, anti
+    // opencode error sesi panjang.
+    if($ocTurns >= 20 && $openSession !== '') {
+        $resumePack = oc_auto_handoff_summary($P,$messagesIn);
+        if($mapFile !== '')@ unlink($mapFile);
+        $openSession = '';
+        if($resumePack !== '')array_unshift($messagesIn,['role' => 'system','content' => $resumePack]);
+        oc_emit_handoff($threadId,$ocTurns,'auto-rotate sesi fresh, konteks terakhir dibawa','handoff_rotated');
+        if(function_exists('termEmit'))termEmit('info','🧬 Auto-handoff: sesi CLI di-fresh-kan, konteks penting dibawa. Lanjut!');
+        if(function_exists('applog'))applog('OPENCODE_CLI','auto_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'summary' => $resumePack !== ''? strlen($resumePack): 0]);
+        $ocTurns = oc_thread_bump($threadId,'');
+    }
     $userText = trim((string)$userText);
     if($userText === '') {
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Pesan kosong** — tidak ada yang bisa diproses.\n"]]]]);
@@ -1919,7 +1995,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             }break;
         }
         if($serveCfg !== null && ! $toolsOn && count($attachFiles)=== 0 && debz_card_deps_ok()) {
-            native_agent_run_opencode_card($P,$model,$userText,$openSession,$mapFile,$threadId,$serveCfg,$bin,$allowSessionIn,$attachFiles);
+            native_agent_run_opencode_card($P,$model,$userText,$openSession,$mapFile,$threadId,$serveCfg,$bin,$allowSessionIn,$attachFiles,$messagesIn);
             return;
         }
         if($serveCfg !== null && ! $toolsOn && count($attachFiles)=== 0) {
@@ -2113,6 +2189,14 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                     $lastErrMsg = (string)$em;
                     $hadError = true;
                     $touchProgress();
+                    // ERROR di sesi panjang (>=12 turn): sesi CLI kemungkinan korup/
+                    // overload. Putus map biar request BERIKUTNYA fresh + kasih tau user
+                    // kirim ulang (konteks history terakhir tetap dibawa).
+                    if($ocTurns >= 12 && $mapFile !== '' && is_file($mapFile)) {
+                        @ unlink($mapFile);
+                        oc_emit_handoff($threadId,$ocTurns,'error sesi panjang, map di-reset — kirim ulang pesanmu','handoff_rotated');
+                        if(function_exists('applog'))applog('OPENCODE_CLI','error_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'err' => substr($em,0,120)]);
+                    }
                     if($cliProxy === '') {
                         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode error:** ".$em."\n"]]]]);
                         if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'error','line' => '❌ opencode: '.trunc((string)$em,160)]);

@@ -607,6 +607,96 @@
         }
     }
     if (exportBtn) exportBtn.addEventListener('click', exportChat);
+    // ===== About (profil dev + info APK + credits) — ala modal WHO? di web.
+    // Tombol disuntik ke grid biar satu file patch, tanpa ubah index.php.
+    (function injectAboutBtn() {
+        var grid = document.querySelector('.sidebar-tools-grid');
+        if (!grid || document.getElementById('about-btn')) return;
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.id = 'about-btn';
+        b.className = 'st-btn';
+        b.title = 'About Debz AI';
+        b.innerHTML = '<span class="st-ico">👻</span><span class="st-lbl">About</span>';
+        b.addEventListener('click', function() { closeSidebar(); openAbout(); });
+        grid.appendChild(b);
+    })();
+    function debzAppInfo() {
+        var v = '', root = false, upd = '';
+        try {
+            if (window.DebzAndroid && window.DebzAndroid.getInfo) {
+                var info = JSON.parse(window.DebzAndroid.getInfo());
+                v = info.v || '';
+                root = !!info.root;
+                upd = info.update || '';
+            }
+        } catch (e) {}
+        return { v: v, root: root, upd: upd };
+    }
+    function copyText(t) {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = t;
+            ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            if (ta.parentNode) ta.parentNode.removeChild(ta);
+            showToast('Disalin: ' + t, 2200);
+        } catch (e) {
+            showToast(t, 3500);
+        }
+    }
+    function openAbout() {
+        var old = document.getElementById('debz-about');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+        var ai = debzAppInfo();
+        var ap = (providerData && providerData.providers[activeProviderId]) || null;
+        function row(k, v) {
+            return '<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed rgba(255,255,255,.12);font-size:12.5px;"><span style="color:#9aa0aa;">'
+                + escapeHTML(k) + '</span><strong style="color:#e2e4e9;text-align:right;">' + escapeHTML(v) + '</strong></div>';
+        }
+        function linkRow(emoji, label, url) {
+            return '<button type="button" data-url="' + escapeHTML(url) + '" class="about-link" style="display:flex;align-items:center;gap:8px;width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14);border-radius:9px;color:#4ade80;padding:8px 10px;font-size:12.5px;cursor:pointer;margin-top:6px;text-align:left;">'
+                + '<span>' + emoji + '</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(label) + '</span><span style="color:#9aa0aa;">⧉</span></button>';
+        }
+        var ov = document.createElement('div');
+        ov.id = 'debz-about';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.65);padding:18px;box-sizing:border-box;';
+        var box = document.createElement('div');
+        box.style.cssText = 'max-width:360px;width:100%;max-height:86vh;overflow-y:auto;background:#1d1f24;border:2px solid #000;border-radius:14px;color:#e2e4e9;box-shadow:4px 4px 0 #000;';
+        box.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:2px solid #000;">'
+            + '<span style="font-weight:700;font-size:14px;">👻 About</span>'
+            + '<button type="button" data-x style="background:transparent;border:none;color:#9aa0aa;font-size:16px;cursor:pointer;">✕</button></div>'
+            + '<div style="padding:14px;">'
+            + '<div style="text-align:center;margin-bottom:6px;">'
+            + '<img src="media/debz-dev.jpg" alt="Debz" loading="lazy" style="width:84px;height:84px;border-radius:50%;object-fit:cover;border:2px solid #000;box-shadow:2px 2px 0 #000;background:#0f1012;" onerror="this.style.display=\'none\'">'
+            + '<div style="font-size:15px;font-weight:700;margin-top:6px;">✨Debz</div>'
+            + '<div style="font-size:12px;color:#9aa0aa;margin-top:2px;">Enthusiast Developer — ngoprek Windows, Linux, Android. Bikin tools sederhana biar kerjaan gampang. Learn to Share 🚀</div></div>'
+            + row('Living', 'Buitenzorg 🇮🇩') + row('Hobby', 'Coding 🌐') + row('Status', 'Learn to Share 🚀') + row('Stack', 'Full Native 📚')
+            + '<div style="margin:12px 0 4px;font-size:12px;font-weight:700;color:#4ade80;">📱 APK INFO</div>'
+            + row('Debz AI', ai.v || 'dev') + row('Mode', ai.root ? 'root' : 'non-root') + row('Provider', ap ? (ap.name || activeProviderId) : '-')
+            + row('Model', ap ? (ap.model || '-') : '-') + (ai.upd ? row('Update', '⬆ ' + ai.upd) : '')
+            + '<div style="margin:12px 0 4px;font-size:12px;font-weight:700;color:#4ade80;">💡 INSPIRED BY</div>'
+            + '<div style="font-size:12.5px;color:#e2e4e9;">opencode • Hermes agent • 9router</div>'
+            + '<div style="margin:12px 0 4px;font-size:12px;font-weight:700;color:#4ade80;">🔗 LINK (tap buat salin)</div>'
+            + linkRow('🐙', 'github.com/debzroot', 'https://github.com/debzroot')
+            + linkRow('📸', 'instagram @debzr00t', 'https://instagram.com/debzr00t')
+            + linkRow('☕', 'Donate Saweria', 'https://saweria.co/debzroot')
+            + '</div>';
+        ov.appendChild(box);
+        function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); document.removeEventListener('keydown', onKey, true); }
+        function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
+        ov.addEventListener('click', function(e) {
+            if (e.target === ov) { close(); return; }
+            var x = e.target.closest ? e.target.closest('[data-x]') : null;
+            if (x) { close(); return; }
+            var l = e.target.closest ? e.target.closest('.about-link') : null;
+            if (l) copyText(l.getAttribute('data-url') || '');
+        });
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(ov);
+    }
     // tombol Terminal HP: cuma nongol di dalam APK (JS bridge native).
     // di browser biasa tetap hidden biar ga ada tombol mati.
     if (androidTermBtn) {
@@ -2523,6 +2613,11 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                                 }
                                 continue;
                             }
+                            if (parsed.type === 'handoff_reminder' || parsed.type === 'handoff_rotated') {
+                                window.__handoff = parsed;
+                                if (mySessionId === activeSessionId && typeof showHandoff === 'function') showHandoff(parsed);
+                                continue;
+                            }
 
                             if (parsed.status || parsed.progress) {
                                 if (mySessionId === activeSessionId) showProgress(parsed.emoji || '⚙️', parsed.status || parsed.progress);
@@ -3554,6 +3649,21 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
             wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
     }
+
+    // ===== Auto-handoff — sesi panjang di-refresh server, UI cukup info.
+    window.__handoff = null;
+    window.showHandoff = function(h) {
+        if (!h) return;
+        window.__handoff = h;
+        var turns = h.turns || 0;
+        var reason = h.reason || '';
+        if (h.type === 'handoff_rotated') {
+            showToast('🧬 ' + (reason || 'Sesi di-refresh otomatis, konteks dibawa — lanjut!'), 4500);
+            if (window.__clientLog) window.__clientLog('info', 'handoff rotated: ' + reason);
+        } else if (turns >= 16) {
+            showToast('🧬 Sesi ' + turns + 'x chat (' + reason + ') — auto-handoff jaga biar awet, lanjut aja', 3500);
+        }
+    };
 
     // ===== Compact — ringkas context jadi summary =====
     if (compactBtn) {
