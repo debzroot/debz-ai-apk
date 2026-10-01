@@ -10,7 +10,11 @@
       "command": ["python3", "/opt/debz/app/debz_tools_mcp.py"],
       "enabled": true
     }
-  }
+  },
+  "instructions": [
+    "/opt/debz/app/AGENTS.md",
+    "Awal sesi: baca AGENTS.md, lalu ambil memori notes.db keys bootstrap,map-apk,rules-core-ai,tools-cheatsheet via MCP debz atau /api/note. Jangan glob/grep buta. Bedakan shell proot (/api/exec) vs root Android (/api/android via bridge 8098)."
+  ]
 }
 // Debz AI — config opencode TERISOLASI.
 // Wajib dipakai oleh debz-term.py & webui (env XDG_CONFIG_HOME/XDG_DATA_HOME

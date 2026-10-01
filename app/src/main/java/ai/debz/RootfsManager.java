@@ -22,7 +22,8 @@ public final class RootfsManager {
     // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
     // 16 = WebChromeClient confirm + android bridge root + tool android.
-    private static final int ROOTFS_EPOCH = 16;
+    // 17 = AGENTS.md canonical + opencode instructions + notes auto-seed (agent no-search) + browser http-fallback mirror HP.
+    private static final int ROOTFS_EPOCH = 17;
 
     public interface Progress {
         void on(String stage, int percent);

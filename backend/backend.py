@@ -712,10 +712,29 @@ def api_kill():
 
 _NOTES_DB = str(Path(__file__).resolve().parent / "notes.db")
 
+_NOTES_SEEDS = {
+    "bootstrap": "PROJECT_ROOT=/opt/debz/app (cwd default). Backend :9191 (token .ai-config.ini). Opencode :8092 (cfg opencode-bin/.cfg_home). Android bridge 127.0.0.1:8098 token /opt/debz/.android_bridge.json root:true. Shell proot uid non-root; root Android HANYA via /api/android. Awal sesi: baca AGENTS.md + note get map-apk + note get rules-core-ai.",
+    "map-apk": "app/: backend.py(:9191 semua /api/*), debz-term.py(cwd PROJECT_ROOT, inject AGENTS.md, XDG isolasi), agent.php+agent-helpers.php+providers.php+api.php+index.php(WebUI pwd 1337), debz_tools_mcp.py(MCP: shell_exec,file_read,file_write,file_edit,browser->cdp_chrome.py), cua_driver.py+cua_mcp.py(/api/cua,/api/screenshot), browser.py+cdp_chrome.py(/api/browser), logger.php, skills/*/SKILL.md, opencode-bin/(.cfg_home/opencode/opencode.jsonc,.data_home), proxy-grabber/, Workspaces/<project>/, screenshots Workspaces/debz_ai_screenshots/.",
+    "rules-core-ai": "DUA SHELL: proot(exec/shell_exec: ls cat python php git) vs android(/api/android: pm dumpsys settings input svc cmd). Tool map: file_read/write/edit, db_query, process_list/kill, app_install(pkg proot), http_request/download_file, web_search, browser(goto-screenshot-click/type/eval), computer_use(status-screenshot-click/type/key)+screenshot, scheduler(cron), backup, archive, note, skill(search dulu baru get). Patch: backup ~/.ai_staging/BACKUP, direct patch, no .bak/tmp_/session_ di app/Workspaces, diff -u, php -l/py_compile. Danger need_approval->approved=true. Single source: AGENTS.md+notes.db+skills.",
+    "tools-cheatsheet": "shell_exec: {command,timeout 5-300}. file_read {path,offset,limit}. file_write {path,content} overwrite. file_edit {path,oldString,newString,replaceAll} exact unik. browser {command: goto|content|text|title|screenshot|click|type|press|wait|eval + url/selector/text/key/ms/js}. android: POST /api/android {command,timeout} contoh dumpsys battery, pm list packages, settings get system screen_brightness, input tap 500 500. cua: {action: status|screenshot|open|launch|click|dblclick|rightclick|move|drag|type|key|scroll}. Job lama: nohup > /tmp/x.log & + tail. Cek bridge: cat /opt/debz/.android_bridge.json.",
+}
+
+
+def _notes_ensure_seeds(conn):
+    # Auto-seed idempoten: INSERT OR IGNORE agar edit user tidak tertimpa (stable OTA).
+    try:
+        for _k, _v in _NOTES_SEEDS.items():
+            conn.execute("INSERT OR IGNORE INTO notes (key, content) VALUES (?, ?)", (_k, _v))
+        conn.commit()
+    except Exception:
+        pass
+
+
 def _notes_conn():
     conn = _sqlite3.connect(_NOTES_DB, timeout=5)
     conn.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, content TEXT, updated_at TEXT DEFAULT (datetime('now')))")
     conn.commit()
+    _notes_ensure_seeds(conn)
     return conn
 
 
@@ -1079,6 +1098,11 @@ def api_browser():
         if not url.startswith(("http://", "https://", "file://")):
             return jsonify({"error": "url harus http(s):// atau file://"}), 400
         args.append(url)
+        try:
+            with open("/tmp/debz-browser-url", "w", encoding="utf-8") as _f:
+                _f.write(url)
+        except Exception:
+            pass
     elif command == "screenshot":
         p = str(body.get("path", "")).strip() or (_BROWSER_SHOT_DIR + "/browser_shot.png")
         args.append(p)
@@ -1138,7 +1162,63 @@ def api_browser():
     if not data.get("ok") and stderr:
         data.setdefault("error", stderr[:2000])
     data.setdefault("command", command)
+    # HTTP fallback: CDP butuh Chrome remote-debug / WebView debug yang dari
+    # proot tidak kelihatan (abstract socket beda namespace). Untuk perintah
+    # baca (goto/content/text/title) fallback ke fetch HTTP biasa (tanpa JS).
+    if not data.get("ok") and command in ("goto", "content", "text", "title"):
+        fb_url = ""
+        if command == "goto" and len(args) > 1:
+            fb_url = args[1]
+        else:
+            try:
+                if os.path.isfile(_BROWSER_URL_FILE):
+                    with open(_BROWSER_URL_FILE, encoding="utf-8") as _f:
+                        fb_url = _f.read().strip()
+            except Exception:
+                fb_url = ""
+        if fb_url.startswith(("http://", "https://")):
+            fb = _browser_http_fetch(fb_url, command)
+            if fb.get("ok"):
+                fb["engine"] = "http-fallback"
+                fb["warn"] = (data.get("error") or "CDP unavailable")[:300]
+                fb["command"] = command
+                return jsonify(fb), 200
+            data["fallback_error"] = fb.get("error", "")[:300]
     return jsonify(data), 200
+
+
+_BROWSER_URL_FILE = "/tmp/debz-browser-url"
+
+
+def _browser_http_fetch(fb_url, command):
+    try:
+        import requests as _rq
+        r = _rq.get(fb_url, timeout=25, headers={
+            "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"})
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        ctype = (r.headers.get("Content-Type") or "")
+        if "html" not in ctype and "<html" not in r.text[:2000].lower():
+            txt = r.text[:20000]
+            return {"ok": True, "url": fb_url, "title": fb_url,
+                    "text": txt, "content": txt}
+        doc = r.text
+        m = re.search(r"<title[^>]*>(.*?)</title>", doc, re.DOTALL | re.IGNORECASE)
+        title = _html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", m.group(1))).strip()) if m else fb_url
+        body = re.sub(r"<script.*?</script>|<style.*?</style>|<noscript.*?</noscript>", " ",
+                      doc, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", body)
+        text = _html.unescape(re.sub(r"[ \t\xa0]+", " ", text))
+        text = re.sub(r"\n\s*\n+", "\n\n", text).strip()[:20000]
+        if command == "title":
+            return {"ok": True, "url": fb_url, "title": title}
+        if command == "text":
+            return {"ok": True, "url": fb_url, "title": title, "text": text}
+        return {"ok": True, "url": fb_url, "title": title, "text": text,
+                "content": doc[:60000]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
 
 
 import time as _time
@@ -1207,12 +1287,56 @@ def api_web_search():
         "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
     }
+    # Chain: DDG html -> Bing RSS (terbukti 200 di HP) -> Bing HTML -> DDG lite.
+    # DDG sering 202/block dari IP operator, Bing jadi andalan.
+    try:
+        r = requests.get(url, headers=headers, timeout=timeout)
+        if r.status_code == 200:
+            results = _parse_ddg(r.text, max_results)
+            if results:
+                return jsonify({"query": query, "count": len(results),
+                                "results": results, "engine": "duckduckgo"}), 200
+    except Exception:
+        pass
+    try:
+        r = requests.get("https://www.bing.com/search?q=" + _urlparse.quote(query) + "&format=rss",
+                         headers=headers, timeout=timeout)
+        if r.status_code == 200:
+            results = _parse_bing_rss(r.text, max_results)
+            if results:
+                return jsonify({"query": query, "count": len(results),
+                                "results": results, "engine": "bing-rss"}), 200
+    except Exception:
+        pass
+    try:
+        r = requests.get("https://www.bing.com/search?q=" + _urlparse.quote(query),
+                         headers={**headers, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"},
+                         timeout=timeout)
+        if r.status_code == 200:
+            results = _parse_bing_html(r.text, max_results)
+            if results:
+                return jsonify({"query": query, "count": len(results),
+                                "results": results, "engine": "bing-html"}), 200
+    except Exception:
+        pass
     try:
         r = requests.get(url, headers=headers, timeout=timeout)
     except Exception as e:
         return jsonify({"error": f"web search gagal: {e}"}), 502
     if r.status_code != 200:
-        return jsonify({"error": f"web search HTTP {r.status_code}"}), 502
+        # coba lite sebagai usaha terakhir sebelum nyerah
+        try:
+            r2 = requests.get(
+                "https://lite.duckduckgo.com/lite/?q=" + _urlparse.quote(query),
+                headers=headers, timeout=timeout)
+            if r2.ok:
+                results = _parse_ddg_lite(r2.text, max_results)
+                if results:
+                    return jsonify({"query": query, "count": len(results),
+                                    "results": results, "engine": "ddg-lite"}), 200
+        except Exception:
+            pass
+        return jsonify({"error": f"web search HTTP {r.status_code} (ddg+bing gagal)"}), 502
     results = _parse_ddg(r.text, max_results)
     if not results:
 
@@ -1230,6 +1354,44 @@ def api_web_search():
         "results": results,
         "engine": "duckduckgo",
     }), 200
+
+
+def _parse_bing_rss(xml_text, max_results):
+    out = []
+    for m in re.finditer(r"<item>(.*?)</item>", xml_text, re.DOTALL | re.IGNORECASE):
+        if len(out) >= max_results:
+            break
+        blk = m.group(1)
+        t = re.search(r"<title>(.*?)</title>", blk, re.DOTALL | re.IGNORECASE)
+        l = re.search(r"<link>(.*?)</link>", blk, re.DOTALL | re.IGNORECASE)
+        d = re.search(r"<description>(.*?)</description>", blk, re.DOTALL | re.IGNORECASE)
+        title = _html.unescape(re.sub(r"<[^>]+>", "", t.group(1)).strip()) if t else ""
+        link = _html.unescape((l.group(1) if l else "").strip()) if l else ""
+        desc = _html.unescape(re.sub(r"<[^>]+>", "", d.group(1)).strip()) if d else ""
+        if not title or not link.startswith(("http://", "https://")):
+            continue
+        out.append({"title": title[:300], "url": link[:500], "snippet": desc[:600]})
+    return out
+
+
+def _parse_bing_html(html_text, max_results):
+    out = []
+    for m in re.finditer(r'<li[^>]*class="b_algo"[^>]*>(.*?)</li>',
+                         html_text, re.DOTALL | re.IGNORECASE):
+        if len(out) >= max_results:
+            break
+        blk = m.group(1)
+        a = re.search(r'<h2>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+                      blk, re.DOTALL | re.IGNORECASE)
+        if not a:
+            continue
+        href, title = a.group(1), _html.unescape(re.sub(r"<[^>]+>", "", a.group(2)).strip())
+        if not title or not href.startswith(("http://", "https://")):
+            continue
+        p = re.search(r'<p[^>]*>(.*?)</p>', blk, re.DOTALL | re.IGNORECASE)
+        snippet = _html.unescape(re.sub(r"<[^>]+>", "", p.group(1)).strip()) if p else ""
+        out.append({"title": title[:300], "url": href[:500], "snippet": snippet[:600]})
+    return out
 
 
 def _parse_ddg_lite(html_text, max_results):
@@ -1957,4 +2119,19 @@ if __name__ == "__main__":
         _port = 9191
     _host = os.environ.get("TOOLS_HOST", "127.0.0.1")
     print(f"[tool-server] Starting on {_host}:{_port}...", file=sys.stderr)
+    try:
+        _reg = {"tools": _port,
+                "web": int(os.environ.get("PORT_WEB", "0") or 0),
+                "api": int(os.environ.get("PORT_API", "0") or 0),
+                "fpm": int(os.environ.get("PORT_FPM", "0") or 0),
+                "host": _host, "updated": _time.strftime("%Y-%m-%dT%H:%M:%S")}
+        for _cand in ("/opt/debz/.ports.json",
+                      str(Path(__file__).resolve().parent / ".ports.json")):
+            try:
+                with open(_cand, "w", encoding="utf-8") as _f:
+                    json.dump(_reg, _f)
+            except Exception:
+                pass
+    except Exception:
+        pass
     app.run(host=_host, port=_port)
