@@ -114,6 +114,8 @@ def _download(url, out, tries=3):
             print(f"   ! retry {attempt}/{tries}: {url.split('/')[-1]}", flush=True)
             time.sleep(2 * attempt)
     return "unreachable"
+
+def main():
     dest = sys.argv[1]
     wanted = sys.argv[2:]
     os.makedirs(dest, exist_ok=True)
