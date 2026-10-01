@@ -126,10 +126,10 @@ APK dibuka
 | <img src="docs/screenshots/02-chat-ready.png" width="250" /> | <img src="docs/screenshots/03-live-agent.png" width="250" /> | <img src="docs/screenshots/04-sessions-routing.png" width="250" /> |
 | Chat langsung jalan di HP | Agent baca file + eksekusi tool | Fixed / Round-Robin / Failover |
 
-| Provider Settings | Mode Selector | Chat Home |
-|---|---|---|
-| <img src="docs/screenshots/05-provider-settings.png" width="250" /> | <img src="docs/screenshots/06-mode-selector.png" width="250" /> | <img src="docs/screenshots/01-chat-home.png" width="250" /> |
-| Ganti model tanpa API key | native / opencode-cli / chat polos | Install → buka → langsung chat |
+| Provider Settings | Mode Selector |
+|---|---|
+| <img src="docs/screenshots/05-provider-settings.png" width="250" /> | <img src="docs/screenshots/06-mode-selector.png" width="250" /> |
+| Ganti model tanpa API key | native / opencode-cli / chat polos |
 
 ## Build & CI
 
