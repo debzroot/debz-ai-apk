@@ -84,8 +84,10 @@ jobs:
 
       - name: Fetch proot arm64 (jniLibs)
         run: |
+          # retry+timeout: tanpa ini flake jaringan = build merah/hang.
+          CURL="curl -sSL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 30 --max-time 300"
           mkdir -p app/src/main/jniLibs/arm64-v8a
-          curl -sSL -o /tmp/proot.deb https://packages.termux.org/apt/termux-main/pool/main/p/proot/proot_5.1.107.95_aarch64.deb
+          $CURL -o /tmp/proot.deb https://packages.termux.org/apt/termux-main/pool/main/p/proot/proot_5.1.107.95_aarch64.deb
           dpkg-deb -x /tmp/proot.deb /tmp/proot-ex
           cp /tmp/proot-ex/data/data/com.termux/files/usr/bin/proot app/src/main/jniLibs/arm64-v8a/libproot.so
           # proot Termux link dinamis ke libtalloc + libandroid-shmem +
@@ -94,7 +96,7 @@ jobs:
           # sendiri ke files/bin + LD_LIBRARY_PATH saat exec.
           mkdir -p app/src/main/assets
           pkg_url() {
-            curl -sSL https://packages.termux.org/apt/termux-main/dists/stable/main/binary-aarch64/Packages \
+            $CURL https://packages.termux.org/apt/termux-main/dists/stable/main/binary-aarch64/Packages \
               | awk -v p="$1" '/^Package: /{f=($2==p)} f && /^Filename: /{print "https://packages.termux.org/apt/termux-main/"$2; exit}'
           }
           fetch_lib() {
@@ -106,7 +108,7 @@ jobs:
             [ -n "$url" ] || { echo "::error::$1 tidak ketemu di Packages index"; exit 1; }
             echo "lib $n -> $url"
             rm -rf /tmp/lib-ex && mkdir -p /tmp/lib-ex
-            curl -sSL -o /tmp/lib.deb "$url"
+            $CURL -o /tmp/lib.deb "$url"
             dpkg-deb -x /tmp/lib.deb /tmp/lib-ex
             cp /tmp/lib-ex/data/data/com.termux/files/usr/lib/$glob app/src/main/assets/
           }

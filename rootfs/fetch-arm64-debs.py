@@ -13,11 +13,17 @@ def fetch_packages():
     for pocket in POCKETS:
         for comp in COMPS:
             url = f"{PORTS}/dists/{pocket}/{comp}/binary-arm64/Packages.gz"
-            try:
-                with urllib.request.urlopen(url, timeout=60) as r:
-                    raw = gzip.decompress(r.read()).decode("utf-8", "replace")
-            except Exception as e:
-                print(f"   ! skip {pocket}/{comp}: {e}", flush=True)
+            raw = None
+            for attempt in range(1, 4):
+                try:
+                    with urllib.request.urlopen(url, timeout=60) as r:
+                        raw = gzip.decompress(r.read()).decode("utf-8", "replace")
+                    break
+                except Exception as e:
+                    if attempt == 3:
+                        print(f"   ! skip {pocket}/{comp}: {e}", flush=True)
+                    continue
+            if raw is None:
                 continue
             cur = {}
             def commit(cur):
@@ -83,7 +89,31 @@ def closure(idx, provides, wanted):
                     stack.append(d)
     return {x for x in seen if not x.startswith("__missing__")}
 
-def main():
+def _download(url, out, tries=3):
+    # urlretrieve tanpa timeout = gantung selamanya kalau koneksi stall
+    # (CI rootfs pernah hang >10 mnt). Timeout + retry + buang file parsial.
+    import time
+    for attempt in range(1, tries + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r, \
+                    open(out, "wb") as f:
+                while True:
+                    chunk = r.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            return None
+        except Exception as e:
+            try:
+                if os.path.exists(out):
+                    os.remove(out)
+            except OSError:
+                pass
+            if attempt == tries:
+                return e
+            print(f"   ! retry {attempt}/{tries}: {url.split('/')[-1]}", flush=True)
+            time.sleep(2 * attempt)
+    return "unreachable"
     dest = sys.argv[1]
     wanted = sys.argv[2:]
     os.makedirs(dest, exist_ok=True)
@@ -106,11 +136,11 @@ def main():
         if os.path.exists(out):
             ok += 1
             continue
-        try:
-            urllib.request.urlretrieve(url, out)
+        err = _download(url, out)
+        if err is None:
             ok += 1
-        except Exception as e:
-            fail.append(f"{p} ({e})")
+        else:
+            fail.append(f"{p} ({err})")
     print(f"   unduh OK: {ok}, gagal: {len(fail)}", flush=True)
     for f in fail[:20]:
         print(f"   - {f}", flush=True)

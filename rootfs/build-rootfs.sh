@@ -18,8 +18,12 @@ APP_SRC_DIR="${APP_SRC_DIR:-$SCRIPT_DIR/../backend}"
 
 mkdir -p "$WORK" "$OUT" "$DEBS" "$ROOTFS"
 
+# curl tanpa retry/timeout = CI gantung (pernah >10 mnt) atau mati di
+# flake jaringan. --retry-all-errors biar 5xx/timeout ikut diulang.
+CURL="curl -sSL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 30 --max-time 600"
+
 echo ">> [1/7] ubuntu-base arm64"
-curl -sSL -o "$WORK/base.tar.gz" "$UBUNTU_BASE_URL"
+$CURL -o "$WORK/base.tar.gz" "$UBUNTU_BASE_URL"
 tar -xzf "$WORK/base.tar.gz" -C "$ROOTFS"
 
 echo ">> [2/7] unduh paket arm64 langsung dari ports (tanpa apt host)"
@@ -29,7 +33,7 @@ python3 "$SCRIPT_DIR/fetch-arm64-debs.py" "$DEBS" \
   nginx ca-certificates \
   python3 python3-venv
 echo ">> [2b/7] get-pip.py bootstrap"
-curl -sSL -o "$ROOTFS/opt/debz-get-pip-tmp" https://bootstrap.pypa.io/get-pip.py 2>/dev/null && mkdir -p "$ROOTFS/opt/debz" && mv "$ROOTFS/opt/debz-get-pip-tmp" "$ROOTFS/opt/debz/get-pip.py" || echo "   ! get-pip.py gagal diunduh, first-boot pakai ensurepip"
+$CURL -o "$ROOTFS/opt/debz-get-pip-tmp" https://bootstrap.pypa.io/get-pip.py 2>/dev/null && mkdir -p "$ROOTFS/opt/debz" && mv "$ROOTFS/opt/debz-get-pip-tmp" "$ROOTFS/opt/debz/get-pip.py" || echo "   ! get-pip.py gagal diunduh, first-boot pakai ensurepip"
 
 echo ">> [3/7] unpack .deb ke rootfs"
 for f in "$DEBS"/*.deb; do dpkg-deb -x "$f" "$ROOTFS"; done
@@ -52,7 +56,7 @@ ln -sf php8.3 "$ROOTFS/usr/bin/php"
 ls "$ROOTFS/etc/php/8.3/fpm/conf.d/"
 
 echo ">> [4/7] opencode $OPENCODE_VER (arm64)"
-curl -sSL -o "$WORK/opencode.tgz" "$OPENCODE_URL"
+$CURL -o "$WORK/opencode.tgz" "$OPENCODE_URL"
 mkdir -p "$ROOTFS/opt/opencode"
 tar -xzf "$WORK/opencode.tgz" -C "$ROOTFS/opt/opencode"
 
