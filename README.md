@@ -119,6 +119,18 @@ APK dibuka
 3. Login WebUI password `1337` → chat langsung jalan.
 4. Sidebar: **Tools ON** (agent bisa shell/file/search) + **AllowAll ON** (tanpa approval).
 
+## Galeri
+
+| Chat siap | Live Agent ngoding | Sessions + Routing |
+|---|---|---|
+| <img src="docs/screenshots/02-chat-ready.png" width="250" /> | <img src="docs/screenshots/03-live-agent.png" width="250" /> | <img src="docs/screenshots/04-sessions-routing.png" width="250" /> |
+| Chat langsung jalan di HP | Agent baca file + eksekusi tool | Fixed / Round-Robin / Failover |
+
+| Provider Settings | Mode Selector | Chat Home |
+|---|---|---|
+| <img src="docs/screenshots/05-provider-settings.png" width="250" /> | <img src="docs/screenshots/06-mode-selector.png" width="250" /> | <img src="docs/screenshots/01-chat-home.png" width="250" /> |
+| Ganti model tanpa API key | native / opencode-cli / chat polos | Install → buka → langsung chat |
+
 ## Build & CI
 
 - CI (`.github/workflows/build.yml`): job `rootfs` → job `android` (needs).
