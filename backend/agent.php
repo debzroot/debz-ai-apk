@@ -2011,7 +2011,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             $cmd[]= '-s';
             $cmd[]= $openSession;
         }
-        if($toolsOn) {
+        if($toolsOn || native_allow_all_get() || $allowSessionIn === true) {
             $cmd[]= '--auto';
         }foreach($attachFiles as $af) {
             $af = (string)$af;
@@ -2438,21 +2438,60 @@ function native_tools_token(): string {
     }
     return $token;
 }
+function native_tools_ports(): array {
+    $ports = [];
+    foreach(['TOOLS_PORT','BACKEND_PORT'] as $k) {
+        $v = (int)(getenv($k) ?: 0);
+        if($v > 0 && $v < 65536)$ports[] = $v;
+    }
+    $f = __DIR__.'/.ai-config.ini';
+    if(is_file($f) && is_readable($f)) {
+        foreach((array)@file($f,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+            $line = trim((string)$line);
+            if(stripos($line,'AI_TOOLS_PORT') !== 0)continue;
+            $p = strpos($line,'=');
+            if($p === false)continue;
+            $v = (int)trim(substr($line,$p + 1));
+            if($v > 0 && $v < 65536)$ports[] = $v;
+        }
+    }
+    foreach(['/opt/debz/.ports.json',__DIR__.'/.ports.json'] as $pf) {
+        if(! is_file($pf) || ! is_readable($pf))continue;
+        $raw = @file_get_contents($pf);
+        if($raw === false)continue;
+        $d = json_decode($raw,true);
+        if(! is_array($d))continue;
+        foreach(['tools','api'] as $k) {
+            $v = (int)($d[$k] ?? 0);
+            if($k === 'tools' && $v > 0 && $v < 65536)$ports[] = $v;
+        }
+    }
+    foreach([35189,9191] as $v)$ports[] = $v;
+    $ports = array_values(array_unique(array_filter($ports)));
+    return $ports !== [] ? $ports : [9191];
+}
 function native_call_tool(string $endpoint,array $args,& $approvalInfo = null): array {
-    $base = 'http://127.0.0.1:9191/api/'.ltrim($endpoint,'/');
     $token = native_tools_token();
     $payload = array_merge(['token' => $token],$args);
     $encoded = json_encode($payload,JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if($encoded === false)return[false,['error' => 'tool payload JSON encode gagal: '.json_last_error_msg()]];
-    $ch = curl_init($base);
-    if($ch === false)return[false,['error' => 'gagal inisialisasi cURL tool']];
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => true,CURLOPT_POST => true,CURLOPT_HTTPHEADER =>['Content-Type: application/json','Accept: application/json','Connection: keep-alive'],CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 30,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
-    $raw = curl_exec($ch);
-    $http = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
-    $err = curl_error($ch);
-    $errno = curl_errno($ch);
-    curl_close($ch);
-    if($raw === false)return[false,['error' => 'tool server unreachable: '.($err !== ''? $err: 'cURL errno '.$errno)]];
+    $path = '/api/'.ltrim($endpoint,'/');
+    $raw = false; $http = 0; $err = ''; $errno = 0; $tried = [];
+    foreach(native_tools_ports() as $port) {
+        $tried[] = $port;
+        $base = 'http://127.0.0.1:'.$port.$path;
+        $ch = curl_init($base);
+        if($ch === false)continue;
+        curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => true,CURLOPT_POST => true,CURLOPT_HTTPHEADER =>['Content-Type: application/json','Accept: application/json','Connection: keep-alive'],CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 5,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
+        $res = curl_exec($ch);
+        $http = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
+        $err = curl_error($ch);
+        $errno = curl_errno($ch);
+        curl_close($ch);
+        if($res !== false) { $raw = $res; break; }
+        if(! in_array($errno,[7,28],true)) { $raw = false; break; }
+    }
+    if($raw === false)return[false,['error' => 'tool server unreachable (ports '.implode(',',$tried).'): '.($err !== ''? $err: 'cURL errno '.$errno)]];
     $raw = (string)$raw;
     $data = json_decode($raw,true);
     if(! is_array($data)) {

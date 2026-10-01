@@ -3979,6 +3979,10 @@ class Agent:
                                             _pats = _p.get("patterns") or []
                                             _cmd = _pats[0] if _pats else ""
                                         _perm = _p.get("permission", "tool")
+                                        # Live-check file agar toggle sidebar AllowAll langsung ngefek
+                                        # walau agent process sudah jalan dari sebelum toggle ON.
+                                        if _allow_all_get():
+                                            self.allow_all = True
 
                                         if self.allow_all or self.allow_session:
                                             _auto = "always" if self.allow_all else "once"
@@ -4408,6 +4412,8 @@ class Agent:
                         raise CanceledByUser()
 
                     if isinstance(result, dict) and result.get("need_approval"):
+                        if _allow_all_get():
+                            self.allow_all = True
                         if self.allow_all or self.allow_session:
                             tree.below("[yellow]🔓 Disetujui otomatis[/yellow]")
                             result = self._shell_out(self.tools.exec(result["command"], approved=True))
@@ -5433,6 +5439,8 @@ def main():
                 try:
                     r = agent.tools.exec(cmd)
                     if r.get("need_approval"):
+                        if _allow_all_get():
+                            agent.allow_all = True
                         if agent.allow_all or agent.allow_session:
                             r = agent.tools.exec(cmd, approved=True)
                         else:

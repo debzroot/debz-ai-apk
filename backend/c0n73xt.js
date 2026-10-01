@@ -2798,7 +2798,8 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
 
     /* ==================== UI v2: Provider / Settings / Tools / Compact ==================== */
 
-    var toolsOn = false;
+    var toolsOn = true;
+    try { var _t = localStorage.getItem('debz_tools_on'); if (_t === '0') toolsOn = false; if (_t === '1') toolsOn = true; } catch (e) {}
     var activeProviderId = '';
     var providerData = null;
     var toolsBtn = document.getElementById('tools-toggle');
@@ -2823,6 +2824,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
     if (toolsBtn) {
         toolsBtn.addEventListener('click', function() {
             toolsOn = !toolsOn;
+            try { localStorage.setItem('debz_tools_on', toolsOn ? '1' : '0'); } catch (e) {}
             renderToolsBtn();
             updateStatusText();
             showToast(toolsOn ? '⚡ Tools ON — agent bisa shell/file/search' : '💤 Tools OFF — mode chat biasa', 2200);

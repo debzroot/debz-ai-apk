@@ -1,61 +1,104 @@
-# debz-ai-apk
+# DebzAI — Asisten AI Mobile untuk Android (Hybrid APK)
 
-Hybrid Android APK buat **debz-ai**: cangkang native (WebView + terminal + service)
-+ backend di **proot-mini** + update kode via **OTA app-layer** (tanpa rebuild APK).
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform: Android](https://img.shields.io/badge/Platform-Android-brightgreen.svg)](app/)
+[![Backend: proot-mini](https://img.shields.io/badge/Backend-proot--mini-blue.svg)](rootfs/)
 
-Status: **0.2.0-run** — install langsung jalan offline. Rootfs-mini
-(~130MB) dibundle di APK assets, backend debz-ai + provider opencode-cli
-(tanpa API key) kebake di rootfs. Pertama buka: ekstrak otomatis →
-stack up (php-fpm + nginx + opencode serve) → WebView ke backend lokal.
+**DebzAI** adalah asisten AI mobile opensource khusus Android: APK native ringan yang membawa
+agent AI langsung di HP — bisa ngoding, eksekusi tool, otomatisasi, dan akses sistem —
+tanpa perlu VPS atau API key mahal.
 
-## Arsitektur
+> Install → buka → langsung chat. Rootfs-mini (~130MB) terbundle di APK, backend
+> (php-fpm + nginx + opencode serve) jalan lokal di HP via proot.
 
-- `app/` native: `MainActivity` (WebView → backend lokal),
-  `TerminalActivity` (shell → nanti proot session + `debz-term`),
-  `BootstrapService` (foreground service, jaga backend tetap hidup),
-  `PortManager` (anti-bentrok port, auto free-port + offset profil),
-  `RootDetector` (mode root / non-root), `OtaManager` (stub update bundle).
-- Backend (menyusul): proot-mini (opencode + php-fpm + nginx, slim ~300-400MB,
-  download saat install pertama) + Python backend native.
-- OTA (menyusul): bundle versioned (`debz-term.py`, `index.php`, `agent.php`, …)
-  dari GitHub Releases, verifikasi SHA256, swap atomik + rollback.
+---
 
-## Build lokal / CI
+## Kegunaan APK ini
 
-CI (`.github/workflows/build.yml`): job `rootfs` → job `android` (needs).
-Artefak ada di tab Actions → run → Artifacts.
+- **Asisten ngoding di HP**: baca/tulis/edit file, cari kode, jalankan shell, git, build.
+- **Agent otonom mobile**: tool calling (shell, file, HTTP, SQLite, arsip, proses,
+  scheduler, backup), browser automation (CDP), kendali layar virtual (CUA).
+- **Akses sistem Android**: via Android Bridge (root) — `pm`, `dumpsys`, `settings`,
+  `input tap`, dsb. — plus WebView, terminal, dan foreground service agar backend tetap hidup.
+- **Hemat & stabil**: provider opencode-cli tanpa API key (session per-device),
+  routing multi-provider dengan **round-robin + failover ala 9Router**,
+  proxy pool + blacklist otomatis.
+- **Update gampang**: tiap ada `ROOTFS_EPOCH` baru, app wipe + extract ulang otomatis.
+  Update kode app-layer via OTA dari GitHub Releases (`ci-latest`).
 
-### Session per-device (opsional: secret OPENCODE_SESSION_ID)
+## Fitur utama
 
-Provider opencode-cli otentikasi via header `x-session-id` (tanpa API key).
-Repo menyimpan placeholder `__OPENCODE_SESSION_ID__`. Saat backend pertama
-jalan di HP, `providers_autofix_sid()` generate UUID v4 unik per-device +
-simpan ke `.ai-providers.json` — jadi tiap user otomatis dapat session sendiri,
-anti 401 massal, siap install banyak user.
+- **Hybrid engine**
+  - `opencode` binary (`sst/opencode`, ARM64) — `run` / `serve`, session, tool use.
+  - Native PHP agent (`backend/agent.php`, `debz-term.py`) — planner → worker → verifier,
+    circuit breaker, prompt manager DB-driven, stats dashboard.
+- **Round-robin + failover seperti 9Router**
+  - Provider chain + proxy pool (`proxy-grabber/`), sticky proxy, health-check,
+    failover saat 5xx / timeout / limit, blacklist sementara + auto-expire.
+- **Tools lengkap** (22 via `backend.py`): exec, fs read/write/list/search, http,
+  download, db, archive, ps/kill, skill, note (memori `notes.db`), pkg, web_search,
+  backup, scheduler (cron), computer_use, browser, screenshot, rag.
+- **AllowAll yang beneran auto**: toggle sidebar persist (`.approval_always`),
+  Tools ON default + persist `localStorage`, `--auto` ikut ON saat AllowAll aktif.
+  Tidak ada lagi approval hidden yang bikin agent diam.
+- **Agent cepat paham**: `backend/AGENTS.md` canonical + auto-seed `notes.db`
+  (`bootstrap`, `map-apk`, `rules-core-ai`, `tools-cheatsheet`) — agent langsung
+  tahu peta tool tanpa `glob`/`grep` berulang.
+- **Native Android**: WebView + Terminal + `BootstrapService`, `PortManager`
+  (anti-bentrok port), `RootDetector`, `OtaManager` (poll `ci-latest`), `RootfsManager`
+  (`ROOTFS_EPOCH`), `BridgeServer` (eksekusi root).
 
-Secret `OPENCODE_SESSION_ID` (repo Settings → Secrets → Actions) sifatnya
-OPSIONAL: kalau diisi, CI inject sebagai seed awal; kalau kosong, build tetap
-jalan (warning) dan HP generate sendiri.
+## Arsitektur singkat
 
-### Alur first-run di HP
+```text
+app/ (native: MainActivity, TerminalActivity, BootstrapService,
+      PortManager, RootDetector, OtaManager, RootfsManager, BridgeServer)
+backend/ (php-fpm + nginx serve /opt/debz/app: index.php WebUI,
+      agent.php, api.php, providers.php, debz-term.py,
+      backend.py :tools, debz_tools_mcp.py, cua/browser drivers,
+      skills/*/SKILL.md, AGENTS.md, notes.db auto-seed)
+rootfs/ (build-rootfs.sh: ubuntu-base ARM64 + php + nginx + python wheels
+      + opencode binary + payload /opt/debz → rootfs-mini.tar.gz)
+```
 
-1. Install APK → buka → `BootstrapService` ekstrak rootfs dari assets
-   (tanpa download, tanpa token) → status `extract-rootfs`.
-2. `StackSupervisor` jalanin `first-boot-pip.sh` (bootstrap pip +
-   install wheels offline) → `start-stack.sh`
-   (php-fpm + nginx serve `/opt/debz/app` + opencode serve di port API).
-3. WebView load backend lokal → login password `1337` → chat langsung jalan.
+- `backend/` di-copy ke `$ROOTFS/opt/debz/app` saat build (lihat `rootfs/build-rootfs.sh` langkah 6).
+- `opencode` config isolasi di `backend/opencode-bin/.cfg_home` (jangan dihapus).
+- Port dinamis via `PortManager`, tercatat di `.ports.json` (jangan asumsi `9191`/`8091` tetap).
 
-## Alur dev (HP dulu, GH ngikut)
+## Cara pakai
 
-Repo ini PRIVATE sampai stabil — yang nentuin open public nanti owner.
+1. Install APK dari [Releases](https://github.com/debzroot/debz-ai-apk/releases/tag/ci-latest) (`ci-latest` = build terbaru `main`).
+2. Buka app → rootfs extract otomatis → stack up (php-fpm + nginx + opencode serve).
+3. Login WebUI password `1337` → chat langsung jalan.
+4. Sidebar: **Tools ON** (agent bisa shell/file/search) + **AllowAll ON** (tanpa approval).
 
-1. **HP = meja operasi.** Semua fix dioprek + diverifikasi langsung di rootfs
-   HP (`/data/data/ai.debz/files/rootfs/...`) via bridge, tanpa reinstall.
-   Backend PHP aktif per-request, jadi hot-patch langsung ngefek.
-2. **GH = cermin yang terbukti.** Yang udah verified di HP doang yang
-   di-commit/push. Tiap push `main` → CI build rootfs+APK → `ci-latest`.
-3. **User = terima beres.** Tiap ada `ROOTFS_EPOCH` baru, app wipe + extract
-   ulang otomatis. Notif update muncul via `OtaManager` (poll `ci-latest`).
-4. Aturan epoch: naikkan `ROOTFS_EPOCH` tiap ada perubahan rootfs/backend
-   tak-kompatibel — itu satu-satunya cara HP narik state baru.
+## Build & CI
+
+- CI (`.github/workflows/build.yml`): job `rootfs` → job `android` (needs).
+  Tiap push `main` → build rootfs + APK → upload ke Release rolling `ci-latest`.
+- Alur dev: **HP dulu, GH ngikut** — oprek + verifikasi di rootfs HP,
+  yang sudah terbukti baru di-commit/push. Naikkan `ROOTFS_EPOCH`
+  (`app/.../RootfsManager.java`) tiap ada perubahan backend tak-kompatibel.
+
+```sh
+# build rootfs lokal
+./rootfs/build-rootfs.sh
+# APK via Android Studio / gradle
+./gradlew assembleRelease
+```
+
+## Terinspirasi oleh
+
+- [opencode](https://github.com/sst/opencode) — AI coding agent untuk terminal.
+- [9Router](https://github.com/decolua/9router) — smart router multi-provider dengan round-robin + auto-fallback.
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — autonomous AI agent dengan persistent memory oleh Nous Research.
+
+## Dukung developer
+
+Kalau APK ini ngebantu kerja mobile kamu, traktir kopi biar lanjut stabil:
+
+**[Donate via Saweria — https://saweria.co/debzroot](https://saweria.co/debzroot)**
+
+## Lisensi
+
+[MIT License](LICENSE) — bebas pakai, ubah, dan distribusi. Lihat file `LICENSE`.
