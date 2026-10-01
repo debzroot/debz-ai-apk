@@ -969,6 +969,59 @@ except Exception as e:
     print(f"[tool-server] CUA disabled: {e}", file=sys.stderr)
 
 
+def _android_bridge():
+    # Marker ditulis app Java tiap boot: {"port":8098,"token":"...","root":true}
+    for cand in ("/opt/debz/.android_bridge.json",
+                 os.path.join(DEBZ_HOME, "opt/debz/.android_bridge.json")):
+        try:
+            if os.path.isfile(cand):
+                with open(cand, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict) and d.get("port"):
+                    return d
+        except Exception:
+            continue
+    return {}
+
+
+@app.post("/api/android")
+def api_android():
+    # Eksekusi perintah sisi Android/root (pm, dumpsys, settings, input,
+    # svc, cmd ...) via BridgeServer Java (localhost, token). Beda dengan
+    # /api/exec yang jalan di dalam proot.
+    deny = _auth()
+    if deny:
+        return deny
+    body = request.get_json(silent=True) or {}
+    command = str(body.get("command", "")).strip()
+    timeout = min(int(body.get("timeout", 60) or 60), 300)
+    approved = bool(body.get("approved", False))
+    if not command:
+        return jsonify({"error": "command kosong"}), 400
+    why = is_dangerous(command)
+    if why and not approved:
+        return jsonify(
+            {"need_approval": True, "command": command, "reason": why}
+        ), 202
+    br = _android_bridge()
+    if not br.get("port") or not br.get("token"):
+        return jsonify({"ok": False,
+                        "error": "android bridge belum aktif (butuh APK baru + reboot app)"}), 200
+    try:
+        import requests as _rq
+        r = _rq.post(f"http://127.0.0.1:{int(br['port'])}/exec",
+                     json={"token": br["token"], "command": command,
+                           "timeout": timeout},
+                     timeout=timeout + 10)
+        try:
+            return jsonify(r.json()), 200
+        except Exception:
+            return jsonify({"ok": False,
+                            "error": f"bridge response invalid: {r.text[:300]}"}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"bridge unreachable: {e}"}), 200
+
+
 @app.post("/api/cua")
 def api_cua():
     deny = _auth()

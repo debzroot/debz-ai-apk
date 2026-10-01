@@ -21,8 +21,8 @@ public final class RootfsManager {
 
     // naikkan tiap tarball berubah tak-kompatibel (backend baru, conf
     // baru): device wipe + extract ulang otomatis, tanpa pm clear.
-    // 15 = guard curl semua endpoint legacy + fileinfo + symlink php.
-    private static final int ROOTFS_EPOCH = 15;
+    // 16 = WebChromeClient confirm + android bridge root + tool android.
+    private static final int ROOTFS_EPOCH = 16;
 
     public interface Progress {
         void on(String stage, int percent);

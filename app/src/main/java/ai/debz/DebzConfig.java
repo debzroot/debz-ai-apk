@@ -19,6 +19,8 @@ public final class DebzConfig {
     private static final String KEY_UPDATE_NOTE = "update_note";
     private static final String KEY_LAST_UPDATE_CHECK = "last_update_check";
     private static final String KEY_LAST_NOTIFIED_CI = "last_notified_ci";
+    private static final String KEY_ABRIDGE = "port_abridge";
+    private static final String KEY_ABTOKEN = "abridge_token";
 
     private DebzConfig() {}
 
@@ -130,5 +132,23 @@ public final class DebzConfig {
 
     public static void setLastNotifiedCi(Context ctx, String v) {
         prefs(ctx).edit().putString(KEY_LAST_NOTIFIED_CI, v != null ? v : "").apply();
+    }
+
+    // Android bridge (eksekusi perintah sisi Android/root buat agent).
+    public static int abridgePort(Context ctx) {
+        return prefs(ctx).getInt(KEY_ABRIDGE, -1);
+    }
+
+    public static void setAbridgePort(Context ctx, int port) {
+        prefs(ctx).edit().putInt(KEY_ABRIDGE, port).apply();
+    }
+
+    public static String abridgeToken(Context ctx) {
+        String t = prefs(ctx).getString(KEY_ABTOKEN, "");
+        if (t == null || t.isEmpty()) {
+            t = java.util.UUID.randomUUID().toString();
+            prefs(ctx).edit().putString(KEY_ABTOKEN, t).apply();
+        }
+        return t;
     }
 }

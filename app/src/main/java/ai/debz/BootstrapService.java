@@ -61,6 +61,7 @@ public class BootstrapService extends Service {
                     android.util.Log.i("DebzAI", "stack sudah up + sentinel ok, skip boot");
                     DebzConfig.setStatus(ctx, "up");
                     otaCheckAsync(ctx);
+                    startBridge(ctx);
                     return;
                 }
                 // stack nyala tapi yatim (watchdog mati, sisa kill lama):
@@ -132,6 +133,7 @@ public class BootstrapService extends Service {
                 android.util.Log.i("DebzAI", "stack akhir ok=" + ok);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");
                 if (ok) otaCheckAsync(ctx);
+                if (ok) startBridge(ctx);
             } else {
                 DebzConfig.setStatus(ctx, "no-rootfs");
             }
@@ -161,9 +163,42 @@ public class BootstrapService extends Service {
         }
     }
 
-    // output start stack terakhir, dibaca dari device saat stack-fail
-    private static void saveStackLog(android.content.Context ctx, String out) {
+    // Android bridge: localhost HTTP buat agent eksekusi perintah sisi
+    // Android/root (pm, dumpsys, settings, input ...). Marker dibaca backend.
+    private static void startBridge(android.content.Context ctx) {
         try {
+            int saved = DebzConfig.abridgePort(ctx);
+            int port = saved > 0 ? saved : PortManager.takePreferred(
+                8098 + DebzConfig.portOffset(ctx));
+            int bound = BridgeServer.start(ctx, port);
+            if (bound > 0) {
+                DebzConfig.setAbridgePort(ctx, bound);
+                writeBridgeMarker(ctx, bound);
+            }
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "bridge skip: " + e);
+        }
+    }
+
+    private static void writeBridgeMarker(android.content.Context ctx,
+                                          int port) {
+        try {
+            java.io.File f = new java.io.File(
+                RootfsManager.dir(ctx), "opt/debz/.android_bridge.json");
+            if (f.getParentFile() != null) f.getParentFile().mkdirs();
+            String json = "{\"port\":" + port + ",\"token\":\""
+                + DebzConfig.abridgeToken(ctx) + "\",\"root\":"
+                + RootDetector.suWorks() + "}";
+            java.io.FileWriter w = new java.io.FileWriter(f, false);
+            w.write(json);
+            w.close();
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "bridge marker gagal: " + e);
+        }
+    }
+
+    // output start stack terakhir, dibaca dari device saat stack-fail
+    private static void saveStackLog(android.content.Context ctx, String out) {        try {
             FileWriter w = new FileWriter(new File(ctx.getFilesDir(), "stack-last.log"), false);
             w.write(out != null && !out.isEmpty() ? out : "(kosong)");
             w.close();

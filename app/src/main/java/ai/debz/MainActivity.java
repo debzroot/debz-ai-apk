@@ -84,6 +84,39 @@ public class MainActivity extends Activity {
 
         web = new WebView(this);
         web.addJavascriptInterface(new AndroidBridge(), "DebzAndroid");
+        // WAJIB: tanpa WebChromeClient, JS confirm()/alert() mati total
+        // (return false diam-diam) -> hapus session/clear/compact ga bisa.
+        web.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public boolean onJsConfirm(android.webkit.WebView view, String url,
+                                       String message, android.webkit.JsResult result) {
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                    .setMessage(message)
+                    .setPositiveButton("Ya", (d, w) -> result.confirm())
+                    .setNegativeButton("Batal", (d, w) -> result.cancel())
+                    .setOnCancelListener(d -> result.cancel())
+                    .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsAlert(android.webkit.WebView view, String url,
+                                     String message, android.webkit.JsResult result) {
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                    .setMessage(message)
+                    .setPositiveButton("OK", (d, w) -> result.confirm())
+                    .setOnCancelListener(d -> result.cancel())
+                    .show();
+                return true;
+            }
+
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage msg) {
+                android.util.Log.i("DebzAI-Web",
+                    msg.message() + " (" + msg.sourceId() + ":" + msg.lineNumber() + ")");
+                return true;
+            }
+        });
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
