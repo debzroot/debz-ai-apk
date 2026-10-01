@@ -714,7 +714,7 @@ _NOTES_DB = str(Path(__file__).resolve().parent / "notes.db")
 
 _NOTES_SEEDS = {
     "bootstrap": "PROJECT_ROOT=/opt/debz/app (cwd default). Backend :9191 (token .ai-config.ini). Opencode :8092 (cfg opencode-bin/.cfg_home). Android bridge 127.0.0.1:8098 token /opt/debz/.android_bridge.json root:true. Shell proot uid non-root; root Android HANYA via /api/android. Awal sesi: baca AGENTS.md + note get map-apk + note get rules-core-ai.",
-    "map-apk": "app/: backend.py(:9191 semua /api/*), debz-term.py(cwd PROJECT_ROOT, inject AGENTS.md, XDG isolasi), agent.php+agent-helpers.php+providers.php+api.php+index.php(WebUI pwd 1337), debz_tools_mcp.py(MCP: shell_exec,file_read,file_write,file_edit,browser->cdp_chrome.py), cua_driver.py+cua_mcp.py(/api/cua,/api/screenshot), browser.py+cdp_chrome.py(/api/browser), logger.php, skills/*/SKILL.md, opencode-bin/(.cfg_home/opencode/opencode.jsonc,.data_home), proxy-grabber/, Workspaces/<project>/, screenshots Workspaces/debz_ai_screenshots/.",
+    "map-apk": "app/: backend.py(:9191 semua /api/*), debz-term.py(cwd PROJECT_ROOT, inject AGENTS.md, XDG isolasi), agent.php+agent-helpers.php+providers.php+api.php+index.php(WebUI pwd 1337), debz_tools_mcp.py(MCP: shell_exec,file_read,file_write,file_edit,browser->cdp_chrome.py), cua_driver.py+cua_mcp.py(/api/cua,/api/screenshot), browser.py+cdp_chrome.py(/api/browser), logger.php, skills/*/SKILL.md, opencode-bin/(.cfg_home/opencode/opencode.jsonc,.data_home), Workspaces/<project>/, screenshots Workspaces/debz_ai_screenshots/. PROXY-FREE: semua request direct.",
     "rules-core-ai": "DUA SHELL: proot(exec/shell_exec: ls cat python php git) vs android(/api/android: pm dumpsys settings input svc cmd). Tool map: file_read/write/edit, db_query, process_list/kill, app_install(pkg proot), http_request/download_file, web_search, browser(goto-screenshot-click/type/eval), computer_use(status-screenshot-click/type/key)+screenshot, scheduler(cron), backup, archive, note, skill(search dulu baru get). Patch: backup ~/.ai_staging/BACKUP, direct patch, no .bak/tmp_/session_ di app/Workspaces, diff -u, php -l/py_compile. Danger need_approval->approved=true. Single source: AGENTS.md+notes.db+skills.",
     "tools-cheatsheet": "shell_exec: {command,timeout 5-300}. file_read {path,offset,limit}. file_write {path,content} overwrite. file_edit {path,oldString,newString,replaceAll} exact unik. browser {command: goto|content|text|title|screenshot|click|type|press|wait|eval + url/selector/text/key/ms/js}. android: POST /api/android {command,timeout} contoh dumpsys battery, pm list packages, settings get system screen_brightness, input tap 500 500. cua: {action: status|screenshot|open|launch|click|dblclick|rightclick|move|drag|type|key|scroll}. Job lama: nohup > /tmp/x.log & + tail. Cek bridge: cat /opt/debz/.android_bridge.json.",
 }
@@ -2018,101 +2018,12 @@ def root_handler():
 
 
 # ---------------------------------------------------------------------------
-# Auto proxy-grabber (HP): pakai proxy_grabber.py ASLI (contoh desktop yang
-# sudah teruji — pool/state format identik, mesin pick PHP langsung cocok).
-# refresh_only (--refresh) = mode RINGAN fresh-first, dirancang buat dijaga
-# terus-terusan. Scheduler tipis ini jalanin one-shot tiap 60 detik.
-# Hormat: state manual=true (proxy manual user) atau auto=false (user
-# matikan) -> idle total. Skip kalau run sebelumnya masih jalan.
+# PROXY-FREE BUILD: proxy pool/grabber dibuang total (UI tidak ada opsi proxy,
+# semua jalur direct). Blok auto-proxy dihapus — tidak ada thread/child process.
 # ---------------------------------------------------------------------------
-_AUTO_PROXY_EVERY = 60
-_auto_proxy_started = False
-_auto_proxy_proc = None
-
-
-def _auto_proxy_state():
-    root = Path(__file__).resolve().parent
-    sf = root / "proxy-grabber" / "proxy_state.json"
-    try:
-        return json.loads(sf.read_text()) if sf.is_file() else {}
-    except Exception:
-        return {}
-
-
-def _auto_proxy_allowed(st):
-    if not isinstance(st, dict):
-        return True
-    if st.get("manual"):
-        return False
-    return st.get("auto", True) is not False
-
-
-def _auto_proxy_run_once():
-    global _auto_proxy_proc
-    if _auto_proxy_proc is not None and _auto_proxy_proc.poll() is None:
-        return
-    root = Path(__file__).resolve().parent
-    gd = root / "proxy-grabber"
-    script = gd / "proxy_grabber.py"
-    if not script.is_file():
-        return
-    log = gd / "refresh.log"
-    try:
-        if log.is_file() and log.stat().st_size > 512 * 1024:
-            log.write_text("")
-    except Exception:
-        pass
-    env = dict(os.environ)
-    env["AI_PROXY_FRESH_TOP"] = env.get("AI_PROXY_FRESH_TOP", "3")
-    env["AI_PROXY_FRESH_BUDGET"] = env.get("AI_PROXY_FRESH_BUDGET", "250")
-    try:
-        lf = log.open("a")
-    except Exception:
-        lf = None
-    try:
-        _auto_proxy_proc = subprocess.Popen(
-            [sys.executable, "proxy_grabber.py", "--refresh"],
-            cwd=str(gd), env=env,
-            stdout=lf or subprocess.DEVNULL,
-            stderr=subprocess.STDOUT)
-        # fd parent ditutup langsung (child pegang dup-nya sendiri) —
-        # kalau tidak: fd leak tiap run + rotasi log rusak.
-        try:
-            if lf:
-                lf.close()
-        except Exception:
-            pass
-    except Exception as e:
-        print(f"[auto-proxy] spawn gagal: {e}", file=sys.stderr)
-        try:
-            if lf:
-                lf.close()
-        except Exception:
-            pass
-
-
-def _auto_proxy_loop():
-    while True:
-        try:
-            if _auto_proxy_allowed(_auto_proxy_state()):
-                _auto_proxy_run_once()
-        except Exception as e:
-            print(f"[auto-proxy] loop gagal: {e}", file=sys.stderr)
-        _time.sleep(_AUTO_PROXY_EVERY)
-
-
-def start_auto_proxy():
-    global _auto_proxy_started
-    if _auto_proxy_started:
-        return
-    _auto_proxy_started = True
-    t = _threading.Thread(target=_auto_proxy_loop, name="auto-proxy", daemon=True)
-    t.start()
-
 
 if __name__ == "__main__":
     _startup_helpers()
-    start_auto_proxy()
     _port = int(os.getenv("TOOLS_PORT", os.getenv("BACKEND_PORT", 9191)))
     if _port < 1024:
         print(f"[tool-server] Port {_port} < 1024, naikkan ke 9191 (butuh root)", file=sys.stderr)

@@ -21,8 +21,8 @@ tanpa perlu VPS atau API key mahal.
 - **Akses sistem Android**: via Android Bridge (root) — `pm`, `dumpsys`, `settings`,
   `input tap`, dsb. — plus WebView, terminal, dan foreground service agar backend tetap hidup.
 - **Hemat & stabil**: provider opencode-cli tanpa API key (session per-device),
-  routing multi-provider dengan **round-robin + failover ala 9Router**,
-  proxy pool + blacklist otomatis.
+  routing multi-provider dengan **failover otomatis ala 9Router** (provider chain,
+  retry + backoff, semua direct tanpa proxy).
 - **Update gampang**: tiap ada `ROOTFS_EPOCH` baru, app wipe + extract ulang otomatis.
   Update kode app-layer via OTA dari GitHub Releases (`ci-latest`).
 
@@ -32,9 +32,9 @@ tanpa perlu VPS atau API key mahal.
   - `opencode` binary (`sst/opencode`, ARM64) — `run` / `serve`, session, tool use.
   - Native PHP agent (`backend/agent.php`, `debz-term.py`) — planner → worker → verifier,
     circuit breaker, prompt manager DB-driven, stats dashboard.
-- **Round-robin + failover seperti 9Router**
-  - Provider chain + proxy pool (`proxy-grabber/`), sticky proxy, health-check,
-    failover saat 5xx / timeout / limit, blacklist sementara + auto-expire.
+- **Failover seperti 9Router (PROXY-FREE)**
+  - Provider chain + circuit breaker + retry ber-backoff, semua request direct.
+  - Failover saat 5xx / timeout / limit / stall, auto-handoff sesi berat.
 - **Tools lengkap** (22 via `backend.py`): exec, fs read/write/list/search, http,
   download, db, archive, ps/kill, skill, note (memori `notes.db`), pkg, web_search,
   backup, scheduler (cron), computer_use, browser, screenshot, rag.

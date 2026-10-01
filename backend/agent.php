@@ -15,692 +15,14 @@ function debz_generate_opencode_id(string $prefix): string {
     }
     return $prefix.$hexPart.$base62Part;
 }
-function debz_proxy_state_file(): string {
-    return __DIR__.'/proxy-grabber/proxy_state.json';
-}
-function debz_proxy_list_file(string $type): string {
-    return __DIR__.'/proxy-grabber/proxies_out/'.$type.'.txt';
-}
-function debz_proxy_blacklist_file(): string {
-    return __DIR__.'/proxy-grabber/proxies_out/blacklist.json';
-}
-function debz_proxy_score_file(): string {
-    return __DIR__.'/proxy-grabber/proxies_out/proxy_scores.json';
-}
-function debz_proxy_load_state():? array {
-    $f = debz_proxy_state_file();
-    if(! is_file($f)|| ! is_readable($f))return null;
-    $raw = @ file_get_contents($f);
-    if(empty($raw))return null;
-    $j = json_decode($raw,true);
-    return is_array($j)? $j: null;
-}
-function debz_proxy_state_update(callable $fn): array {
-    $f = debz_proxy_state_file();
-    $dir = dirname($f);
-    if(! is_dir($dir))@ mkdir($dir,0770,true);
-    $fp = @ fopen($f,'c+');
-    if(! $fp) {
-        $st = debz_proxy_load_state();
-        $out = $fn(is_array($st)? $st:[]);
-        return is_array($out)? $out:[];
-    }@ flock($fp,LOCK_EX);
-    $raw = stream_get_contents($fp);
-    $st = json_decode((string)$raw,true);
-    if(! is_array($st))$st = [];
-    $out = $fn($st);
-    if(is_array($out)) {
-        @ rewind($fp);
-        @ ftruncate($fp,0);
-        @ fwrite($fp,json_encode($out,JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        @ fflush($fp);
-    }@ flock($fp,LOCK_UN);
-    @ fclose($fp);
-    return is_array($out)? $out:[];
-}
-function debz_proxy_sticky_enabled(): bool {
-    $st = debz_proxy_load_state();
-    if(! is_array($st))return true;
-    return($st['sticky_enabled']?? true)!== false;
-}
-function debz_proxy_sticky_ok(string $proxy): void {
-    if($proxy === '')return;
-    $enableSticky = debz_proxy_sticky_enabled();
-    debz_proxy_state_update(function(array $st)use($proxy,$enableSticky): array {
-        $st['sticky_proxy']= $proxy;
-        $st['sticky_type']= (string)($st['sticky_type']?? 'http');
-        $st['sticky']= $enableSticky;
-        $st['last_live']= time();
-        return $st;
-    });
-}
-function debz_proxy_mark_used(string $proxy): void {
-    debz_proxy_state_update(function(array $st)use($proxy): array {
-        $st['last_used_proxy']= $proxy;
-        $st['last_used_at']= time();
-        $st['last_used_source']= 'php';
-        return $st;
-    });
-}
-function debz_proxy_blacklist_get_tier(int $failCount): int {
-    $fails = max(1,(int)$failCount);
-    if($fails <= 1)return 900;
-    if($fails <= 2)return 3600;
-    return 86400;
-}
-function debz_proxy_bl_tier_for(string $reason,int $failCount): int {
-    if($reason === 'rl')return 86400;
-    return debz_proxy_blacklist_get_tier($failCount);
-}
-function debz_proxy_is_blacklisted(string $proxy): bool {
-    if($proxy === '')return false;
-    $f = debz_proxy_blacklist_file();
-    if(! is_file($f)|| ! is_readable($f))return false;
-    $raw = @ file_get_contents($f);
-    if(empty($raw))return false;
-    $bl = json_decode($raw,true);
-    if(! is_array($bl))return false;
-    $host = parse_url('http://'.$proxy,PHP_URL_HOST)?: $proxy;
-    $keysToCheck = ($host !== $proxy)?[$proxy,$host]:[$proxy];
-    $now = time();
-    foreach($keysToCheck as $k) {
-        $entry = $bl[$k]?? null;
-        if(! $entry)continue;
-        if(! is_array($entry)) {
-            $ts = (int)$entry;
-            if($ts > 0 &&($now - $ts < 86400))return true;
-        }else {
-            $ts = (int)($entry['ts']?? 0);
-            $fails = (int)($entry['fails']?? 1);
-            $reason = (string)($entry['reason']?? '');
-            $tier = debz_proxy_bl_tier_for($reason,$fails);
-            if($now - $ts < $tier)return true;
-        }
-    }
-    return false;
-}
-function debz_proxy_blacklist_add(string $proxy): void {
-    if($proxy === '')return;
-    $f = debz_proxy_blacklist_file();
-    $dir = dirname($f);
-    if(! is_dir($dir))@ mkdir($dir,0770,true);
-    $raw = is_file($f)? @ file_get_contents($f): false;
-    $bl = (! empty($raw)&& is_string($raw))? json_decode($raw,true):[];
-    if(! is_array($bl))$bl = [];
-    $now = time();
-    $host = parse_url('http://'.$proxy,PHP_URL_HOST)?: $proxy;
-    $keysToAdd = ($host !== $proxy)?[$proxy,$host]:[$proxy];
-    $reason = $GLOBALS['debz_bl_reason']?? '';
-    foreach($keysToAdd as $k) {
-        $oldFails = is_array($bl[$k]?? null)? (int)($bl[$k]['fails']?? 0): 0;
-        if(! is_array($bl[$k]?? null))$bl[$k]= [];
-        $bl[$k]['ts']= $now;
-        $bl[$k]['fails']= $oldFails + 1;
-        if($reason !== '')$bl[$k]['reason']= $reason;
-    }$GLOBALS['debz_bl_reason']= '';
-    foreach($bl as $p => $e) {
-        $eFails = is_array($e)? (int)($e['fails']?? 1): 1;
-        $eTs = is_array($e)? (int)($e['ts']?? 0): (int)($e ?? 0);
-        $eReason = is_array($e)? (string)($e['reason']?? ''): '';
-        $tier = debz_proxy_bl_tier_for($eReason,$eFails);
-        if($now - $eTs >= $tier)unset($bl[$p]);
-    }@ file_put_contents($f,json_encode($bl,JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),LOCK_EX);
-}
-function debz_proxy_health_check(string $proxy): bool {
-    $parts = parse_url('http://'.$proxy);
-    $host = $parts['host']?? '';
-    $port = (int)($parts['port']?? 80);
-    if($host === '' || $port <= 0 || $port > 65535)return false;
-    $errno = 0;
-    $errstr = '';
-    $fp = @ fsockopen($host,$port,$errno,$errstr,5);
-    if($fp) {
-        fclose($fp);
-        return true;
-    }
-    return false;
-}
-function debz_proxy_probe_urls(): array {
-    $urls = [];
-    $pf = __DIR__.'/proxy-grabber/probe_config.json';
-    if(is_file($pf)&& is_readable($pf)) {
-        $cfg = @ json_decode((string)@ file_get_contents($pf),true);
-        if(is_array($cfg)&& ! empty($cfg['url'])) {
-            $urls[]= (string)$cfg['url'];
-        }
-    }$urls[]= 'https://www.gstatic.com/generate_204';
-    return array_values(array_unique($urls));
-}
-function debz_proxy_probe(string $proxy,int $timeoutMs = 2500): string {
-    $parts = parse_url('http://'.$proxy);
-    $host = $parts['host']?? '';
-    $port = (int)($parts['port']?? 0);
-    if($host === '' || $port <= 0 || $port > 65535)return 'error';
-    if(! function_exists('curl_init'))return debz_proxy_probe_tcp($proxy,$timeoutMs);
-    $timeout = max(1,min((int)$timeoutMs,8000));
-    foreach(debz_proxy_probe_urls()as $url) {
-        $isZen = (stripos($url,'opencode.ai')!== false || stripos($url,'/zen/')!== false);
-        $ch = @ curl_init();
-        if($ch === false)return 'error';
-        @ curl_setopt($ch,CURLOPT_URL,$url);
-        @ curl_setopt($ch,CURLOPT_PROXY,$proxy);
-        @ curl_setopt($ch,CURLOPT_PROXYTYPE,CURLPROXY_HTTP);
-        @ curl_setopt($ch,CURLOPT_HTTPPROXYTUNNEL,true);
-        @ curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,$isZen);
-        @ curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,$isZen? 2: 0);
-        @ curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
-        @ curl_setopt($ch,CURLOPT_CONNECTTIMEOUT_MS,$timeout);
-        @ curl_setopt($ch,CURLOPT_TIMEOUT_MS,$timeout);
-        @ curl_setopt($ch,CURLOPT_USERAGENT,'Mozilla/5.0 (Linux; Android 14) Probe/2.0');
-        @ curl_setopt($ch,CURLOPT_NOBODY,false);
-        @ curl_setopt($ch,CURLOPT_FOLLOWLOCATION,false);
-        $res = @ curl_exec($ch);
-        $code = (int)@ curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
-        $errn = (int)@ curl_errno($ch);
-        $errs = (string)@ curl_error($ch);
-        @ curl_close($ch);
-        if($errn === 60 || $errn === 51 || $errn === 35 || stripos($errs,'SSL')!== false || stripos($errs,'certificate')!== false)return 'refused';
-        if($code === 200 || $code === 204 || $code === 401 || $code === 403)return 'ok';
-        if($code === 429)return 'refused';
-        if($errn === 0 && $code > 0)continue;
-        if($errn === 28)continue;
-        if(preg_match('/refused|unreachable|reset by peer/i',$errs))return 'refused';
-        if(preg_match('/timed ?out|timeout/i',$errs))continue;
-        continue;
-    }
-    return 'timeout';
-}
-function debz_proxy_probe_tcp(string $proxy,int $timeoutMs = 2500): string {
-    $parts = parse_url('http://'.$proxy);
-    $host = $parts['host']?? '';
-    $port = (int)($parts['port']?? 0);
-    if($host === '' || $port <= 0 || $port > 65535)return 'error';
-    $timeout = max(1,min((int)$timeoutMs,8000))/ 1000;
-    $errno = 0;
-    $errstr = '';
-    $fp = @ fsockopen($host,$port,$errno,$errstr,$timeout);
-    if($fp !== false) {
-        fclose($fp);
-        return 'ok';
-    }$e = (int)$errno;
-    if(in_array($e,[111,113,112,101,10060,10061,10065],true))return 'refused';
-    if($e === 110)return 'timeout';
-    if($errstr !== '' && preg_match('/refused|unreachable|timed out|timedout|timeout/i',$errstr)) {
-        return preg_match('/refused|unreachable/i',$errstr)? 'refused': 'timeout';
-    }
-    return 'timeout';
-}
-function debz_proxy_probe_cached(string $proxy,int $timeoutMs = 2500): string {
-    if(! isset($GLOBALS['_debz_probe_cache']))$GLOBALS['_debz_probe_cache']= [];
-    if(isset($GLOBALS['_debz_probe_cache'][$proxy]))return $GLOBALS['_debz_probe_cache'][$proxy];
-    $status = debz_proxy_probe($proxy,$timeoutMs);
-    $GLOBALS['_debz_probe_cache'][$proxy]= $status;
-    return $status;
-}
-function debz_proxy_probe_parallel(array $cands,int $timeoutMs = 4000): string {
-    if(empty($cands))return '';
-    if(! function_exists('curl_multi_init')) {
-        $socks = [];
-        $meta = [];
-        $i = 0;
-        foreach($cands as $p) {
-            $i ++;
-            $parts = parse_url('http://'.$p);
-            $host = (string)($parts['host']?? '');
-            $port = (int)($parts['port']?? 0);
-            if($host === '' || $port <= 0 || $port > 65535)continue;
-            $errno = 0;
-            $errstr = '';
-            $fp = @ stream_socket_client('tcp://'.$host.':'.$port,$errno,$errstr,1.0,STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT);
-            if(! is_resource($fp))continue;
-            stream_set_blocking($fp,false);
-            $socks[$i]= $fp;
-            $meta[$i]= $p;
-            if(count($socks)>= 8)break;
-        }
-        if(empty($socks))return '';
-        $deadline = microtime(true)+(max(0.2,min((int)$timeoutMs,4000))/ 1000);
-        while(! empty($socks)&& microtime(true)< $deadline) {
-            $r = $socks;
-            $w = $socks;
-            $e = null;
-            $sel = @ stream_select($r,$w,$e,0,100000);
-            if($sel === false) {
-                foreach($socks as $sfp)if(is_resource($sfp))@ fclose($sfp);
-                return '';
-            }
-            if($sel <= 0)continue;
-            foreach($w as $idx => $sfp) {
-                if(! is_resource($sfp)) {
-                    unset($socks[$idx],$meta[$idx]);
-                    continue;
-                }$peer = @ stream_socket_get_name($sfp,true);
-                if($peer !== false) {
-                    foreach($socks as $other)if(is_resource($other)&& $other !== $sfp)@ fclose($other);
-                    @ fclose($sfp);
-                    return $meta[$idx];
-                }@ fclose($sfp);
-                unset($socks[$idx],$meta[$idx]);
-            }
-            foreach($r as $idx => $sfp) {
-                if(isset($socks[$idx])) {
-                    @ fclose($socks[$idx]);
-                    unset($socks[$idx],$meta[$idx]);
-                }
-            }
-        }
-        foreach($socks as $sfp)if(is_resource($sfp))@ fclose($sfp);
-        return '';
-    }$mh = @ curl_multi_init();
-    if($mh === false)return '';
-    $urls = debz_proxy_probe_urls();
-    $timeout = max(1,min((int)$timeoutMs,8000));
-    $handles = [];
-    $byProxy = [];
-    $maxCand = min(8,count($urls)> 1? (int)floor(16 / count($urls)): 8);
-    foreach(array_slice($cands,0,$maxCand)as $p) {
-        $parts = parse_url('http://'.$p);
-        $host = (string)($parts['host']?? '');
-        $port = (int)($parts['port']?? 0);
-        if($host === '' || $port <= 0 || $port > 65535)continue;
-        foreach($urls as $url) {
-            $isZen = (stripos($url,'opencode.ai')!== false || stripos($url,'/zen/')!== false);
-            $ch = @ curl_init();
-            if($ch === false)continue;
-            @ curl_setopt($ch,CURLOPT_URL,$url);
-            @ curl_setopt($ch,CURLOPT_PROXY,$p);
-            @ curl_setopt($ch,CURLOPT_PROXYTYPE,CURLPROXY_HTTP);
-            @ curl_setopt($ch,CURLOPT_HTTPPROXYTUNNEL,true);
-            @ curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,$isZen);
-            @ curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,$isZen? 2: 0);
-            @ curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
-            @ curl_setopt($ch,CURLOPT_CONNECTTIMEOUT_MS,$timeout);
-            @ curl_setopt($ch,CURLOPT_TIMEOUT_MS,$timeout);
-            @ curl_setopt($ch,CURLOPT_USERAGENT,'Mozilla/5.0 (Linux; Android 14) Probe/2.0');
-            @ curl_multi_add_handle($mh,$ch);
-            $id = (int)$ch;
-            $handles[$id]= $p;
-            $byProxy[$p][]= $ch;
-        }
-    }
-    if(empty($handles)) {
-        @ curl_multi_close($mh);
-        return '';
-    }$deadline = microtime(true)+($timeout / 1000);
-    $running = null;
-    do {
-        $status = @ curl_multi_exec($mh,$running);
-        while($info = curl_multi_info_read($mh)) {
-            if(($info['result']?? 0)=== 0) {
-                $code = (int)@ curl_getinfo($info['handle'],CURLINFO_RESPONSE_CODE);
-                if($code === 200 || $code === 204 || $code === 401 || $code === 403) {
-                    $picked = $handles[(int)$info['handle']]?? '';
-                    if($picked !== '') {
-                        @ curl_multi_remove_handle($mh,$info['handle']);
-                        @ curl_close($info['handle']);
-                        foreach($byProxy[$picked]??[]as $other) {
-                            if(is_resource($other)&& $other !== $info['handle']) {
-                                @ curl_multi_remove_handle($mh,$other);
-                                @ curl_close($other);
-                            }
-                        }@ curl_multi_close($mh);
-                        return $picked;
-                    }
-                }
-            }@ curl_multi_remove_handle($mh,$info['handle']);
-            @ curl_close($info['handle']);
-        }
-        if(! is_int($running)|| $running <= 0)break;
-        if(microtime(true)>= $deadline)break;
-        $sel = @ curl_multi_select($mh,0.05);
-        if($sel < 0)usleep(5000);
-    }while(true);
-    foreach($handles as $id => $p) {
-        @ curl_multi_remove_handle($mh,$id);
-        @ curl_close($id);
-    }@ curl_multi_close($mh);
-    return '';
-}
-function debz_proxy_cli_latency(string $proxy): int {
-    $parts = parse_url('http://'.$proxy);
-    $host = $parts['host']?? '';
-    $port = (int)($parts['port']?? 80);
-    if($host === '' || $port <= 0 || $port > 65535)return - 1;
-    $errno = 0;
-    $errstr = '';
-    $t0 = microtime(true);
-    $fp = @ fsockopen($host,$port,$errno,$errstr,3);
-    if($fp) {
-        fclose($fp);
-        return (int)((microtime(true)- $t0)* 1000);
-    }
-    return - 1;
-}
-function debz_proxy_load_scores(): array {
-    $f = debz_proxy_score_file();
-    if(! is_file($f)|| ! is_readable($f))return[];
-    $raw = @ file_get_contents($f);
-    if(empty($raw))return[];
-    $j = json_decode($raw,true);
-    return is_array($j)? $j:[];
-}
-function debz_proxy_save_scores(array $scores): void {
-    $scoreFile = debz_proxy_score_file();
-    $dir = dirname($scoreFile);
-    if(! is_dir($dir))@ mkdir($dir,0770,true);
-    $now = time();
-    foreach($scores as $p => & $s) {
-        $last = (int)($s['last']?? $now);
-        $ageH = max(0,($now - $last)/ 3600);
-        if($ageH > 24) {
-            unset($scores[$p]);
-            continue;
-        }$decay = max(0.03125,pow(0.5,$ageH));
-        $s['ok']= round((float)($s['ok']?? 0)* $decay,2);
-        $s['fail']= round((float)($s['fail']?? 0)* $decay,2);
-        $s['last']= $last;
-    }unset($s);
-    @ file_put_contents($scoreFile,json_encode($scores,JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),LOCK_EX);
-}
-function debz_proxy_score_record(string $proxy,bool $success): void {
-    if($proxy === '')return;
-    $scores = debz_proxy_load_scores();
-    $now = time();
-    if(! isset($scores[$proxy])) {
-        $scores[$proxy]= ['ok' => 0,'fail' => 0,'last' => $now];
-    }
-    if($success) {
-        $scores[$proxy]['ok']= (int)($scores[$proxy]['ok']?? 0)+ 1;
-    }else {
-        $scores[$proxy]['fail']= (int)($scores[$proxy]['fail']?? 0)+ 1;
-    }$scores[$proxy]['last']= $now;
-    debz_proxy_save_scores($scores);
-}
-function debz_proxy_get_score(string $proxy): int {
-    $scores = debz_proxy_load_scores();
-    if(! isset($scores[$proxy]))return 50;
-    $ok = (int)($scores[$proxy]['ok']?? 0);
-    $fail = (int)($scores[$proxy]['fail']?? 0);
-    $total = $ok + $fail;
-    if($total === 0)return 50;
-    return (int)round(($ok / $total)* 100);
-}
-function debz_proxy_auto_type(): string {
-    $best = 'http';
-    $bestN = - 1;
-    foreach(['http','socks4','socks5']as $pt) {
-        $lf = debz_proxy_list_file($pt);
-        if(! is_file($lf))continue;
-        $raw = @ file($lf,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if(! is_array($raw))continue;
-        $n = 0;
-        foreach($raw as $line) {
-            $line = trim((string)$line);
-            if($line !== '' && ! debz_proxy_is_blacklisted($line))$n ++;
-        }
-        if($n > $bestN) {
-            $bestN = $n;
-            $best = $pt;
-        }
-    }
-    return $best;
-}
-function debz_proxy_pick(string $type,bool $forceNew = false): string {
-    if($type === 'auto')$type = debz_proxy_auto_type();
-    $lf = debz_proxy_list_file($type);
-    if(! is_file($lf)|| ! is_readable($lf))return '';
-    $raw = @ file($lf,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if(! is_array($raw)|| empty($raw))return '';
-    $lines = [];
-    $seen = [];
-    foreach($raw as $line) {
-        $line = trim((string)$line);
-        if($line === '' || isset($seen[$line])|| debz_proxy_is_blacklisted($line))continue;
-        $seen[$line]= true;
-        $lines[]= $line;
-    }
-    if(empty($lines))return '';
-    $triedRound = $GLOBALS['_debz_proxy_tried_round']??[];
-    if(! empty($triedRound)) {
-        $lines = array_values(array_filter($lines,function($p)use($triedRound) {
-            return ! isset($triedRound[$p]);
-        }));
-        if(empty($lines))return '';
-    }usort($lines,function($a,$b) {
-        return debz_proxy_get_score($b)- debz_proxy_get_score($a);
-    });
-    $st = debz_proxy_load_state()??[];
-    $sticky = ! empty($st['sticky']);
-    if($sticky && ! $forceNew) {
-        $current = (string)($st['sticky_proxy']?? '');
-        if($current !== '' && in_array($current,$lines,true)&& ! debz_proxy_is_blacklisted($current)) {
-            return $current;
-        }
-    }$rot = (string)($st['rotation']?? 'roundrobin');
-    if($rot === 'random') {
-        $pick = $lines[array_rand($lines)];
-    }elseif($rot === 'first') {
-        $pick = $lines[0];
-    }else {
-        $rr = (int)($st['rr_index']?? 0);
-        $pick = $lines[$rr % count($lines)];
-    }debz_proxy_state_update(function(array $s)use($pick,$type): array {
-        $old = (string)($s['sticky_proxy']?? $s['last_proxy']?? '');
-        $s['sticky_proxy']= $pick;
-        $s['sticky_type']= $type;
-        $s['sticky']= true;
-        $s['last_live']= time();
-        $s['last_proxy']= $pick;
-        $s['rr_index']= (int)($s['rr_index']?? 0)+ 1;
-        $s['rotate_event']= ['ts' => time(),'by' => 'php','old' => $old,'new' => $pick];
-        return $s;
-    });
-    return $pick;
-}
-function debz_proxy_pick_live(string $type,bool $forceNew = false): array {
-    if($type === 'auto')$type = debz_proxy_auto_type();
-    $ls = debz_proxy_list_file($type);
-    if(! is_file($ls)|| ! is_readable($ls))return['proxy' => '','usedType' => $type];
-    $raw = @ file($ls,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if(! is_array($raw)|| empty($raw))return['proxy' => '','usedType' => $type];
-    $lines = [];
-    $seen = [];
-    $triedRound = $GLOBALS['_debz_proxy_tried_round']??[];
-    foreach($raw as $line) {
-        $line = trim((string)$line);
-        if($line === '' || isset($seen[$line]))continue;
-        $seen[$line]= true;
-        if(debz_proxy_is_blacklisted($line))continue;
-        if(isset($triedRound[$line]))continue;
-        $lines[]= $line;
-    }
-    if(empty($lines)) {
-        if(! empty($triedRound))$GLOBALS['_debz_proxy_tried_round']= [];
-        return['proxy' => '','usedType' => $type];
-    }    usort($lines,function($a,$b) {
-        return debz_proxy_get_score($b)- debz_proxy_get_score($a);
-    });
-    $stRot = debz_proxy_load_state()??[];
-    $rot = (string)($stRot['rotation']?? 'roundrobin');
-    if($rot === 'random') {
-        shuffle($lines);
-    }elseif($rot === 'roundrobin') {
-        $rr = (int)($stRot['rr_index']?? 0);
-        if(count($lines)> 1) {
-            $off = $rr % count($lines);
-            if($off > 0)$lines = array_merge(array_slice($lines,$off),array_slice($lines,0,$off));
-        }
-        debz_proxy_state_update(function(array $s): array {
-            $s['rr_index']= (int)($s['rr_index']?? 0)+ 1;
-            return $s;
-        });
-    }
-    $enableSticky = debz_proxy_sticky_enabled();
-    $batch = 8;
-    while(! empty($lines)) {
-        $chunk = array_splice($lines,0,$batch);
-        $found = debz_proxy_probe_parallel($chunk,4000);
-        if($found !== '') {
-            debz_proxy_state_update(function(array $s)use($found,$type,$enableSticky): array {
-                $old = (string)($s['sticky_proxy']?? $s['last_proxy']?? '');
-                $s['sticky_proxy']= $found;
-                $s['sticky_type']= $type;
-                $s['sticky']= $enableSticky;
-                $s['last_live']= time();
-                $s['last_proxy']= $found;
-                $s['rotate_event']= ['ts' => time(),'by' => 'php','old' => $old,'new' => $found];
-                return $s;
-            });
-            return['proxy' => $found,'usedType' => $type];
-        }
-        foreach($chunk as $cand) {
-            debz_proxy_score_record($cand,false);
-            $GLOBALS['_debz_proxy_tried_round'][$cand]= true;
-        }
-    }
-    return['proxy' => '','usedType' => $type];
-}
-function debz_proxy_failover(string $proxy,string $reason = '',bool $blacklist = true): void {
-    if($proxy === '')return;
-    if($blacklist) {
-        $GLOBALS['debz_bl_reason']= ($reason === 'rl')? 'rl': '';
-        debz_proxy_blacklist_add($proxy);
-        $GLOBALS['debz_bl_reason']= '';
-    }debz_proxy_score_record($proxy,false);
-    $GLOBALS['_debz_proxy_tried_round'][$proxy]= true;
-    debz_proxy_state_update(function(array $st)use($proxy,$reason,$blacklist): array {
-        if(! empty($st['sticky_proxy'])&& $st['sticky_proxy']=== $proxy) {
-            unset($st['sticky_proxy']);
-            unset($st['sticky_type']);
-            $st['sticky']= false;
-            $st['rr_index']= (int)($st['rr_index']?? 0)+ 1;
-            $st['last_failover']= ['ts' => time(),'proxy' => $proxy,'reason' => $reason,'blacklist' => $blacklist];
-        }
-        return $st;
-    });
-}
-function debz_proxy_request_grab(): void {
-    $dir = __DIR__.'/proxy-grabber';
-    $py = $dir.'/proxy_grabber.py';
-    if(! is_file($py))return;
-    $lock = $dir.'/.grab_once.lock';
-    $fp = @ fopen($lock,'c+');
-    if($fp) {
-        if(! @ flock($fp,LOCK_EX | LOCK_NB)) {
-            @ fclose($fp);
-            return;
-        }$last = (int)@ filemtime($lock);
-        if(time()- $last < 300) {
-            @ flock($fp,LOCK_UN);
-            @ fclose($fp);
-            return;
-        }@ ftruncate($fp,0);
-        @ fwrite($fp,(string)time());
-        @ fflush($fp);
-        @ flock($fp,LOCK_UN);
-        @ fclose($fp);
-    }$cmd = 'cd '.escapeshellarg($dir).' && nohup python3 proxy_grabber.py --refresh >> run.log 2>&1 &';
-    @ exec($cmd);
-    if(function_exists('applog'))applog('PROXY','grab_requested',['throttle_sec' => 300]);
-}
-function debz_proxy_wait_pool(string $type,int $maxWaitSec = 120): bool {
-    $t0 = time();
-    $lastGrab = 0;
-    while((time()- $t0)< $maxWaitSec) {
-        $lf = debz_proxy_list_file($type);
-        $has = false;
-        if(is_file($lf)&& is_readable($lf)) {
-            $raw = @ file($lf,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            if(is_array($raw)) {
-                foreach($raw as $line) {
-                    $line = trim((string)$line);
-                    if($line !== '' && ! debz_proxy_is_blacklisted($line)) {
-                        $has = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if($has)return true;
-        if((time()- $lastGrab)>= 30) {
-            debz_proxy_request_grab();
-            $lastGrab = time();
-        }
-        if(function_exists('native_sleep_heartbeat'))native_sleep_heartbeat(4000);
-        else usleep(4000000);
-    }
-    return false;
-}
-function debz_proxy_apply($ch,array $opts): string {
-    $GLOBALS['_debz_last_proxy']= '';
-    $st = debz_proxy_load_state();
-    if(! is_array($st))return '';
-    $mode = (string)($st['mode']?? 'proxy');
-    $forceProxy = ! empty($opts['_forceProxy']);
-    if(! $forceProxy) {
-        if($mode === 'direct')return '';
-        if($mode === 'auto') {
-            $recent429 = ! empty($GLOBALS['_debz_direct_429_until'])&& time()< $GLOBALS['_debz_direct_429_until'];
-            if(empty($opts['_useProxy'])&& ! $recent429)return '';
-        }
-    }$forceNew = ! empty($opts['_proxyFail']);
-    $proxy = '';
-    $usedType = '';
-    if(! $forceNew) {
-        $s2 = debz_proxy_load_state()??[];
-        $stickyProxy = (string)($s2['sticky_proxy']?? '');
-        $stickyType = (string)($s2['sticky_type']?? 'http');
-        if(! empty($s2['sticky'])&& debz_proxy_sticky_enabled()&& $stickyProxy !== '' && ! debz_proxy_is_blacklisted($stickyProxy)) {
-            $lastLive = (int)($s2['last_live']?? 0);
-            if($lastLive > 0 && (time()- $lastLive)< 600) {
-                $proxy = $stickyProxy;
-                $usedType = $stickyType;
-            }else {
-                $probeStatus = debz_proxy_probe_cached($stickyProxy,3000);
-                if($probeStatus === 'ok' || $probeStatus === 'timeout') {
-                    $proxy = $stickyProxy;
-                    $usedType = $stickyType;
-                }else {
-                    debz_proxy_failover($stickyProxy,($probeStatus === 'refused')? 'dead': 'slow',($probeStatus === 'refused'));
-                    $forceNew = true;
-                }
-            }
-        }
-    }
-    if($proxy === '') {
-        $type = (string)($st['type']?? 'http');
-        if($type === '')$type = 'http';
-        if($type === 'auto')$type = debz_proxy_auto_type();
-        $picked = debz_proxy_pick_live($type,$forceNew);
-        $proxy = $picked['proxy'];
-        $usedType = $picked['usedType']!== ''? $picked['usedType']: $type;
-    }
-    if($proxy === '') {
-        $waitSec = max(10,(int)getenv('AI_PROXY_POOL_WAIT')?: 120);
-        if(function_exists('termEmit'))termEmit('warn','⚠️ Pool proxy kosong / gak ada yang live. Nunggu proxy-grabber ngasih proxy baru, NO direct...');
-        if(function_exists('applog'))applog('PROXY','pool_empty_wait',['type' => $type,'wait_sec' => $waitSec]);
-        if(debz_proxy_wait_pool($type,$waitSec)) {
-            unset($GLOBALS['_debz_proxy_tried_round']);
-            $pk2 = debz_proxy_pick_live($type,true);
-            $proxy = $pk2['proxy'];
-            if($pk2['usedType']!== '')$usedType = $pk2['usedType'];
-        }else {
-            $GLOBALS['_debz_proxy_empty']= true;
-            if(function_exists('termEmit'))termEmit('limit','⚠️ Pool proxy masih kosong setelah menunggu — request di-hold, TANPA direct. Coba lagi.');
-            if(function_exists('applog'))applog('PROXY','pool_empty_hold',['type' => $type,'wait_sec' => $waitSec]);
-            return '';
-        }
-    }$map = ['http' => CURLPROXY_HTTP,'socks4' => CURLPROXY_SOCKS4,'socks5' => CURLPROXY_SOCKS5];
-    if($usedType === '' || ! isset($map[$usedType])) {
-        $usedType = 'http';
-    }$GLOBALS['_debz_last_proxy']= $proxy;
-    curl_setopt($ch,CURLOPT_PROXY,$proxy);
-    curl_setopt($ch,CURLOPT_PROXYTYPE,$map[$usedType]?? CURLPROXY_HTTP);
-    if(! empty($st['proxy_user'])&& ! empty($st['proxy_pass'])) {
-        curl_setopt($ch,CURLOPT_PROXYUSERPWD,$st['proxy_user'].':'.$st['proxy_pass']);
-    }
-    return $proxy;
-}
+// PROXY-FREE BUILD: proxy pool/grabber dibuang total (UI tidak ada opsi proxy,
+// semua request direct). Stub no-op dipertahankan agar call-site lama tetap jalan.
+function debz_proxy_failover(string $proxy,string $reason = '',bool $blacklist = true): void {}
+function debz_proxy_score_record(string $proxy,bool $success): void {}
+function debz_proxy_sticky_ok(string $proxy): void {}
+function debz_proxy_mark_used(string $proxy): void {}
+function debz_proxy_blacklist_add(string $proxy): void {}
+function debz_proxy_apply($ch,array $opts): string { $GLOBALS['_debz_last_proxy']=''; return ''; }
 function termEmit(string $kind,string $text): void {
     $emojis = ['info' => 'ℹ️','think' => '🧠','tool' => '🛠️','ok' => '✅','error' => '🚨','limit' => '⚠️','proxy' => '🌐','retry' => '🔄','fail' => '🔀'];
     $icon = $emojis[$kind]?? '🔹';
@@ -758,9 +80,6 @@ function debz_net_preflight(string $baseUrl) {
     $cache[$host] = true;
     return true;
 }
-function debz_cli_is_proxy_err(string $text): bool {    if($text === '')return false;
-    return (bool)preg_match('/(HTTP\s+429|HTTPS?\s+429|rate limit|quota habis|quota exhausted|too many requests)/i',$text)|| (bool)preg_match('/(connection|tunnel|proxy|could not connect|failed to connect|ECONN|ETIMEDOUT|ENETUNREACH|timeout|socket|reset|refused|broken pipe|network is unreachable|unexpected eof|empty reply|502|503|504)/i',$text);
-}
 function native_chat_once(string $baseUrl,string $apiKey,string $model,array $messages,array $tools,int $maxTokens,array $opts = []): array {
     $attempt = 0;
     $stripRD = ! empty($opts['strip_reasoning_details']);
@@ -770,7 +89,6 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
     $resumeOn = native_config_int('AI_RESUME_PARTIAL',1)=== 1;
     $keptContent = '';
     $keptReasoning = '';
-    $GLOBALS['_debz_proxy_tried_round']= [];
     while(true) {
         $sendMsgs = $stripRD? native_strip_rd($messages): $messages;
         if($resumeOn && ($keptContent !== '' || $keptReasoning !== '')) {
@@ -806,7 +124,7 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
             if($resumeOn && ($keptContent !== '' || $keptReasoning !== '')) {
                 $r['content'] = $keptContent.(string)$r['content'];
                 $r['reasoning'] = $keptReasoning.(string)$r['reasoning'];
-                if($r['error']!== '')$r['error'] .= ' (partial disambung dari proxy sebelumnya)';
+                if($r['error']!== '')$r['error'] .= ' (partial disambung dari percobaan sebelumnya)';
             }
             return $r;
         }
@@ -832,7 +150,7 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
                 $maxStallRetry
             }
             ) ");
-            if(function_exists('applog'))applog('PROXY','stall_retry',['attempt' => $attempt,'partial_content' => strlen((string)$r['content'])]);
+            if(function_exists('applog'))applog('NET','stall_retry',['attempt' => $attempt,'partial_content' => strlen((string)$r['content'])]);
         }elseif(($r['content']!== '' || $r['reasoning']!== '')&& ! $isProxyError) {
             return $r;
         }elseif(($r['content']!== '' || $r['reasoning']!== '')&& $isProxyError) {
@@ -850,40 +168,12 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
         }$attempt ++;
         $backoff = min(1000 *(2 ** max(0,$attempt - 1)),12000);
         if($isRateLimit)$backoff = min(max($backoff,15000),30000);
-        $shouldRotate = ($isProxyError || $isRateLimit)&& ! empty($GLOBALS['_debz_last_proxy']);
-        if($isRateLimit && empty($GLOBALS['_debz_last_proxy'])) {
+        if($isRateLimit) {
             $GLOBALS['_debz_direct_429_until']= time()+ 600;
         }
-        if($shouldRotate) {
-            $preData = ! empty($r['pre_data']);
-            if($preData && ! $isRateLimit) {
-                debz_proxy_failover($GLOBALS['_debz_last_proxy'],'think',false);
-                termEmit('proxy',"🤔 Server mikir kelamaan (0 byte) — proxy sehat, TANPA blacklist, coba rute baru...");
-                if(function_exists('applog'))applog('PROXY','think_timeout_soft',['proxy' => $GLOBALS['_debz_last_proxy']]);
-            }else {
-                debz_proxy_score_record($GLOBALS['_debz_last_proxy'],false);
-                if($is5xxViaProxy && ! $isRateLimit) {
-                    debz_proxy_failover($GLOBALS['_debz_last_proxy'],'upstream-5xx',false);
-                }else {
-                    $blReason = $isRateLimit? 'rl': '';
-                    debz_proxy_failover($GLOBALS['_debz_last_proxy'],$blReason);
-                }
-            }$opts['_proxyFail']= true;
-            $triedCount = count($GLOBALS['_debz_proxy_tried_round']??[]);
-            if(stripos($errTxt,'Blackhole')!== false) {
-                termEmit('fail',"🕳️ Blackhole proxy (0 tokens). Memutar ke proxy baru...");
-            }elseif($isRateLimit) {
-                termEmit('fail',"⚠️ Rate limit (429). Memutar ke proxy baru...");
-            }elseif($is5xxViaProxy) {
-                termEmit('fail'," 🔀 Provider error 5xx lewat proxy. Coba rute proxy lain... (coba ke- $triedCount ) ");
-            }elseif($isSSLError) {
-                termEmit('fail'," 🔒 SSL error pada proxy. Memutar ke proxy baru... (coba ke- $triedCount ) ");
-            }else {
-                termEmit('fail'," 🔀 Proxy error. Memutar ke proxy baru... (coba ke- $triedCount ) ");
-            }
-        }else {
-            $opts['_proxyFail']= false;
-        }$opts['_useProxy']= true;
+        // PROXY-FREE: retry selalu direct, tanpa rotasi proxy.
+        $opts['_proxyFail']= false;
+        $opts['_useProxy']= true;
         termEmit('retry'," ⏳ Retry # $attempt / $maxRetry  dalam  ".($backoff / 1000)."s...");
         native_sleep_heartbeat($backoff);
     }
@@ -1025,22 +315,9 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
     if(! empty($opts['_sslFallback'])) {
         if(function_exists('termEmit'))termEmit('info',"🔒 SSL verify disabled (fallback mode)");
     }$px = '';
-    if(function_exists('debz_proxy_apply')) {
-        $px = debz_proxy_apply($ch,$opts);
-        if($px !== '') {
-            if($px !== (string)($GLOBALS['_debz_proxy_shown']?? '')) {
-                $GLOBALS['_debz_proxy_shown']= $px;
-                if(function_exists('termEmit'))termEmit('proxy'," Routed via Proxy:  $px ");
-            }
-            if(function_exists('applog'))applog('PROXY','routed',['proxy' => $px]);
-        }        curl_setopt($ch,CURLOPT_TIMEOUT,max(45,native_config_int('AI_PROXY_CURL_TIMEOUT',120)));
-        curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,max(8,native_config_int('AI_PROXY_LOWSPEED_S',25)));
-    }
-    if($px === '' && ! empty($GLOBALS['_debz_proxy_empty'])) {
-        $GLOBALS['_debz_proxy_empty']= false;
-        if(function_exists('applog'))applog('PROXY','routed_blocked_no_pool',[]);
-        return['content' => '','reasoning' => '','reasoningDetails' =>[],'toolCalls' =>[],'usage' => null,'finish_reason' => '','error' => 'Proxy pool kosong — nunggu proxy-grabber tapi belum dapat proxy live. Request di-hold, TANPA direct. Coba lagi nanti.','http_code' => 0];
-    }$ok = curl_exec($ch);
+    // PROXY-FREE: direct selalu, tanpa pool/wait/hold.
+    curl_setopt($ch,CURLOPT_TIMEOUT,max(45,native_config_int('AI_PROXY_CURL_TIMEOUT',120)));
+    curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,max(8,native_config_int('AI_PROXY_LOWSPEED_S',25)));$ok = curl_exec($ch);
     $errno = curl_errno($ch);
     $error = curl_error($ch);
     $httpCode = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
@@ -1051,18 +328,7 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
     if($lineBuf !== '') {
         $processLine($lineBuf);
         $lineBuf = '';
-    }curl_close($ch);
-    if($ok === true && $httpCode > 0 && $httpCode < 400 && ! empty($GLOBALS['_debz_last_proxy'])) {
-        debz_proxy_score_record($GLOBALS['_debz_last_proxy'],true);
-        debz_proxy_sticky_ok($GLOBALS['_debz_last_proxy']);
-        $slowS = max(30,(int)getenv('AI_PROXY_SLOW_S')?: 120);
-        if((microtime(true)- $tReq0)> $slowS) {
-            $slowPx = $GLOBALS['_debz_last_proxy'];
-            debz_proxy_failover($slowPx,'slow',false);
-            if(function_exists('termEmit'))termEmit('proxy',"🐌 Proxy lemot (>".($slowS)."s) — jawaban kepake, request berikut ganti rute.");
-            if(function_exists('applog'))applog('PROXY','slow_rotate',['proxy' => $slowPx,'elapsed_s' => round(microtime(true)- $tReq0,1)]);
-        }
-    }
+    }    curl_close($ch);
     if($ok === false || $errno !== 0) {
         $result['error']= 'cURL error: '.($error !== ''? $error: 'errno '.$errno);
         if($errno === 28) {
@@ -1074,7 +340,7 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
                     $dlBytes
                 }
                 bytes diterima (partial  ".strlen($result['content'])." chars).");
-                if(function_exists('applog'))applog('PROXY','midstream_stall',['proxy' => $GLOBALS['_debz_last_proxy']?? '','bytes' => $dlBytes,'partial_content' => strlen((string)$result['content']),'err' => substr($result['error'],0,200)]);
+                if(function_exists('applog'))applog('NET','midstream_stall',['bytes' => $dlBytes,'partial_content' => strlen((string)$result['content']),'err' => substr($result['error'],0,200)]);
             }
         }
     }elseif($httpCode >= 400) {
@@ -1116,7 +382,6 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
         if($rdi['format']!== '')$item['format']= $rdi['format'];
         $result['reasoningDetails'][]= $item;
     }
-    if(function_exists('debz_proxy_mark_used'))debz_proxy_mark_used($GLOBALS['_debz_last_proxy']?? '');
     return $result;
 }
 function native_planner_enabled(): bool {
@@ -1918,22 +1183,20 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Pesan kosong** — tidak ada yang bisa diproses.\n"]]]]);
         if(function_exists('emitDone'))emitDone();
         return;
-    }$maxProxyTry = 2; // 1x direct + 1x cadangan khusus empty-retry (failover proxy mati total)
+    }$maxProxyTry = 2; // 1x direct + 1x cadangan khusus empty-retry (engine dingin)
     $cliBaseEnv = getenv();
     $cliProxy = '';
-    $cliProxyEnv = [];
     $capsSession = '';
     $usageIn = 0;
     $usageOut = 0;
     $usageTotal = 0;
     $stepInMax = 0;
-    $proxyTryErr = '';
     $emptyRetry = 0;
     for($proxyTry = 0;
     $proxyTry < $maxProxyTry;
     $proxyTry ++) {
-        $cliProxyFail = false;
         [$cliProxy,$cliProxyEnv]= debz_cli_proxy_pick();
+        unset($cliProxyEnv); // PROXY-FREE: env proxy tidak dipakai, selalu direct.
         // PROXY-FREE: pick selalu direct (''). Hold pool dihapus total.
         // Mode direct. Kalau provider ga
         // reachable, CLI gantung bisu sampai deadline 900s — gagalkan cepat
@@ -1960,16 +1223,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         // empty() = desktop tak berubah (HOME/PATH selalu ada di sana).
         if(empty($env['HOME']))$env['HOME'] = '/root';
         if(empty($env['PATH']))$env['PATH'] = '/usr/bin:/bin:/usr/sbin:/sbin';
-        if($cliProxy !== '') {
-            foreach($cliProxyEnv as $_k => $_v) {
-                $env[$_k]= (string)$_v;
-            }
-            if($cliProxy !== (string)($GLOBALS['_debz_proxy_shown']?? '')) {
-                $GLOBALS['_debz_proxy_shown']= $cliProxy;
-                if(function_exists('termEmit'))termEmit('proxy','Routed via Proxy: '.$cliProxy);
-            }
-            if(function_exists('applog'))applog('PROXY','cli_routed',['proxy' => $cliProxy,'try' => $proxyTry + 1]);
-        }$serveCfg = null;
+        $serveCfg = null;
         $serveJson = __DIR__.'/opencode-bin/.serve.json';
         $sj = [];
         if(is_file($serveJson)) {
@@ -2035,21 +1289,15 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         $stderrBuf = '';
         $sawContent = false;
         $textEmitted = false;
-        $hadError = false;
-        $deferErrTxt = '';
         $lastBeat = time();
         $t0 = time();
         $cliDeadline = $t0 + 900;
         $hardCap = $t0 + 1800;
         $thinkingSent = false;
-        $lastErrMsg = '';
         $cliProxyHang = false;
         $lastEventTs = time();
         $lastProgressTs = time();
         $cliTimedOut = false;
-        $hangCfg = max(15,native_config_int('AI_CLI_PROXY_HANG',25));
-        $hangFirst = max($hangCfg,native_config_int('AI_CLI_PROXY_HANG_FIRST',90));
-        $hangBase = $hangFirst;
         $hangNotified = false;
         $loopDetected = false;
         $clientGone = false;
@@ -2177,17 +1425,14 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                         $stepIn = (int)($tk['input']?? 0);
                         if($stepIn > $stepInMax) {
                             $stepInMax = $stepIn;
-                            $hangBase = min(240,$hangCfg + (int)($stepIn / 20000));
                             if($stepIn >= 150000 && ! $hangNotified && function_exists('termEmit')) {
                                 $hangNotified = true;
-                                termEmit('warn','ℹ️ Konteks sesi besar (≈'.number_format($stepIn).' input tokens) — proxy gratis rawan gagal nyangga payload gede, retry dipangkas.');
+                                termEmit('warn','ℹ️ Konteks sesi besar (≈'.number_format($stepIn).' input tokens) — retry dipangkas.');
                             }
                         }
                     }$touchProgress();
                     break;
                     case 'error': $em = isset($ev['error'])&& is_array($ev['error'])?($ev['error']['message']?? 'opencode error'):((string)($ev['error']?? $part['error']?? 'opencode error'));
-                    $lastErrMsg = (string)$em;
-                    $hadError = true;
                     $touchProgress();
                     // ERROR di sesi panjang (>=12 turn): sesi CLI kemungkinan korup/
                     // overload. Putus map biar request BERIKUTNYA fresh + kasih tau user
@@ -2197,13 +1442,10 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                         oc_emit_handoff($threadId,$ocTurns,'error sesi panjang, map di-reset — kirim ulang pesanmu','handoff_rotated');
                         if(function_exists('applog'))applog('OPENCODE_CLI','error_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'err' => substr($em,0,120)]);
                     }
-                    if($cliProxy === '') {
-                        if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode error:** ".$em."\n"]]]]);
-                        if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'error','line' => '❌ opencode: '.trunc((string)$em,160)]);
-                        $sawContent = true;
-                    }else {
-                        $deferErrTxt = (string)$em;
-                    }break;
+                    if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode error:** ".$em."\n"]]]]);
+                    if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'error','line' => '❌ opencode: '.trunc((string)$em,160)]);
+                    $sawContent = true;
+                    break;
                     default: break;
                 }
             }
@@ -2217,13 +1459,6 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             if((time()- $lastBeat)>= 20) {
                 $lastBeat = time();
                 native_heartbeat();
-            }
-            if($cliProxy !== '' && ! $cliProxyHang &&(time()- $lastProgressTs)> $hangBase) {
-                $cliProxyHang = true;
-                if(function_exists('termEmit'))termEmit('retry','Proxy diam/hang ('.$hangBase.' detik tanpa progres, kill + reborn). Masuk failover...');
-                if(function_exists('applog'))applog('PROXY','cli_hang_timeout',['proxy' => $cliProxy,'try' => $proxyTry + 1,'stall' => time()- $lastProgressTs,'base' => $hangBase]);
-                @ proc_terminate($proc);
-                break;
             }
             if($cliProxy === '' && ! $cliProxyHang &&(time()- $lastProgressTs)> 240) {
                 $cliProxyHang = true;
@@ -2281,52 +1516,17 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if($mapFile !== '' && $capsSession !== '') {
             @ file_put_contents($mapFile,json_encode(['sessionID' => $capsSession,'updated' => date('c'),'model' => $model]),LOCK_EX);
         }
-        if($cliProxy !== '') {
-            $failSignal = ($lastErrMsg !== ''? $lastErrMsg: '')."\n".trim((string)$stderrBuf);
-            if($cliProxyHang) {
-                $cliProxyFail = true;
-                $proxyTryErr = 'proxy hang ('.$hangBase.' detik tanpa progres)';
-            }elseif($hadError) {
-                $cliProxyFail = true;
-            }elseif(! $textEmitted && debz_cli_is_proxy_err($failSignal)) {
-                $cliProxyFail = true;
-            }elseif(! $textEmitted && trim($failSignal)=== '') {
-                $cliProxyFail = true;
-            }
-            if($cliProxyFail && $proxyTryErr === '') {
-                $proxyTryErr = trim($failSignal)!== ''? trim($failSignal):('opencode exit '.$exitCode.' tanpa output');
-            }
-        }$effMaxTry = $maxProxyTry;
+        $effMaxTry = $maxProxyTry;
         if($stepInMax >= 250000) {
             $effMaxTry = max(2,(int)round($maxProxyTry * 300000 / $stepInMax));
-            if(function_exists('applog'))applog('PROXY','cli_retry_cap',['ctx_tokens' => $stepInMax,'cap' => $effMaxTry,'full' => $maxProxyTry]);
+            if(function_exists('applog'))applog('NET','cli_retry_cap',['ctx_tokens' => $stepInMax,'cap' => $effMaxTry,'full' => $maxProxyTry]);
         }
-        if(! $cliTimedOut && $cliProxyFail && $proxyTry < $effMaxTry - 1) {
-            $blReason = preg_match('/429|rate limit|quota/i',$proxyTryErr)? 'rl': '';
-            debz_proxy_failover($cliProxy,$blReason);
-            $GLOBALS['_debz_proxy_force_new']= true;
-            if(function_exists('termEmit'))termEmit('fail',($blReason === 'rl'? '⚠️ Rate limit (429) lewat proxy. Blacklist 24 jam + putar proxy baru': 'Proxy error. Blacklist 24 jam + putar proxy baru').'... (coba ke-'.($proxyTry + 2).')');
-            if(function_exists('applog'))applog('PROXY','cli_failover',['proxy' => $cliProxy,'reason' => $blReason,'err' => substr($proxyTryErr,0,200),'try' => $proxyTry + 1]);
-            continue;
-        }
-        if($deferErrTxt !== '') {
-            if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode error:** ".$deferErrTxt."\n"]]]]);
-            if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'error','line' => '❌ opencode: '.trunc($deferErrTxt,160)]);
-            $lastErrMsg = $deferErrTxt;
-            $deferErrTxt = '';
-            $sawContent = true;
-        }
-        if($cliProxy !== '' && $cliProxyFail && $stepInMax >= 250000) {
-            $msg = "\n\nℹ️ **Konteks sesi sangat besar (≈ ".number_format($stepInMax)." input tokens)** — payload kegedean, proxy gratis remuk/blackhole sebelum bisa balas. Pool udah otomatis di-roll. Saran:\n- Bikin **sesi baru** buat lanjut tugas ringan, atau\n- Aktifkan **mode direct** untuk sesi segede ini.\n";
+        if($stepInMax >= 250000 && ! $sawContent) {
+            $msg = "\n\nℹ️ **Konteks sesi sangat besar (≈ ".number_format($stepInMax)." input tokens)** — payload kegedean, provider bisa gagal balas. Saran:\n- Bikin **sesi baru** buat lanjut tugas ringan.\n";
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => $msg]]]]);
-            if(function_exists('termEmit'))termEmit('info','ℹ️ Konteks sesi sangat besar (≈'.number_format($stepInMax).' tokens) — payload melebihi kapasitas proxy gratis. Bikin sesi baru / mode direct buat tugas gede.');
+            if(function_exists('termEmit'))termEmit('info','ℹ️ Konteks sesi sangat besar (≈'.number_format($stepInMax).' tokens) — bikin sesi baru buat tugas gede.');
             $sawContent = true;
         }
-        if($cliProxy !== '' && ! $cliProxyFail) {
-            debz_proxy_score_record($cliProxy,true);
-            debz_proxy_sticky_ok($cliProxy);
-        }
-        if(function_exists('debz_proxy_mark_used'))debz_proxy_mark_used($cliProxy);
         $usageOut = max($usageOut,0);
         $usageIn = max($usageIn,0);
         if($usageTotal > 0 && function_exists('emit')) {

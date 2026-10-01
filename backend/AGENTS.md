@@ -10,7 +10,8 @@
 - Opencode server: port `8092`, cfg isolasi di `opencode-bin/.cfg_home`, data di `opencode-bin/.data_home`
 - Android Bridge (Java): `127.0.0.1:8098`, token di `/opt/debz/.android_bridge.json`, flag `root:true`
 - DB memori: `/opt/debz/app/notes.db` tabel `notes(key,content,updated_at)`
-- Skills: `/opt/debz/app/skills/*/SKILL.md` (30+), discan via `/api/skill action=list/search/get`
+- Skills: `/opt/debz/app/skills/*/SKILL.md`, discan via `/api/skill action=list/search/get`
+- Jaringan: PROXY-FREE — semua request direct, tidak ada proxy pool/grabber.
 - Workspaces user: `/opt/debz/Workspaces/<nama_project>/` — semua output kerja ke sini
 - Screenshots: `/opt/debz/Workspaces/debz_ai_screenshots/`
 - Kamu jalan sebagai uid non-root di dalam proot (`id` ~10314). BUKAN root Android langsung.
@@ -27,8 +28,7 @@ Rule: butuh akses HP (buka app, tap, setting sistem) → SELALU via `/api/androi
 
 ## 3. Peta tool cepat (task → tool, tanpa eksplor)
 - Baca/tulis/edit file: `file_read` / `file_write` / `file_edit` (MCP) = `read_file`/`write_file`/`list_dir`/`search` (native). Edit = exact-string unik, kalau muncul Nx pakai `replaceAll`.
-- `shell_exec` timeout default 60s maks 300s. Output dipotong 8000 char tail. Untuk job lama: `nohup ... > /tmp/x.log &` lalu `tail`.
-- HTTP/API: `http_request` (`/api/http`), download: `download_file` (`/api/download`).
+- `shell_exec` timeout default 60s maks 300s. Output dipotong 8000 char tail. Untuk job lama: `nohup ... > /tmp/x.log &` lalu `tail`.- HTTP/API: `http_request` (`/api/http`), download: `download_file` (`/api/download`).
 - SQLite: `db_query` (`/api/db`) — notes.db, RAG, dsb.
 - Proses: `process_list`/`process_kill` (`/api/ps`, `/api/kill`).
 - Package proot: `app_install` (`/api/pkg`, apk/pkg). BUKAN untuk app Android.

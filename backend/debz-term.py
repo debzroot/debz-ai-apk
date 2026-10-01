@@ -313,8 +313,6 @@ BRAND_NAME = "Debz Term"
 VERSION    = "1.3.3.7"
 COOLDOWN   = int(os.environ.get("DEBZ_COOLDOWN", "300"))
 MAX_RETRY  = int(os.environ.get("DEBZ_MAX_RETRY", "3"))
-PROXY_MAX_RETRY = int(os.environ.get("DEBZ_PROXY_MAX_RETRY", "30"))
-PROXY_SLOW_S = int(os.environ.get("DEBZ_PROXY_SLOW_S", "120"))
 MAX_REPEAT = int(os.environ.get("DEBZ_MAX_REPEAT", "4"))
 STREAM_IDLE_S = int(os.environ.get("DEBZ_STREAM_IDLE_S", "90"))
 STREAM_ABS_S = int(os.environ.get("DEBZ_STREAM_ABS_S", "600"))
@@ -649,621 +647,31 @@ def _get_headers(cfg):
         h[str(hk)] = str(hv)
     return h
 
-PROXY_STATE_FILE = os.path.join(PROJECT_ROOT, "proxy-grabber", "proxy_state.json")
-PROXY_LIST_DIR   = os.path.join(PROJECT_ROOT, "proxy-grabber", "proxies_out")
-PROXY_BLACKLIST  = os.path.join(PROXY_LIST_DIR, "blacklist.json")
-PROXY_SCORES_FILE = os.path.join(PROXY_LIST_DIR, "proxy_scores.json")
-PROXY_PROBE_FILE = os.path.join(PROJECT_ROOT, "proxy-grabber", "probe_config.json")
-
+# PROXY-FREE BUILD: proxy pool/grabber dibuang total (UI tidak ada opsi proxy,
+# semua request direct. Stub no-op dipertahankan agar call-site lama tetap jalan.
 def _proxy_load_state():
-    try:
-        with open(PROXY_STATE_FILE, encoding="utf-8") as f:
-            d = json.load(f)
-        if not isinstance(d, dict) or not d.get("enabled"): return None
-        return d
-    except Exception:
-        return None
-
-def _proxy_bl_tier(fails, reason=""):
-
-    if reason == "rl":
-        return 86400
-    fails = max(1, int(fails))
-    if fails <= 1: return 900
-    if fails <= 2: return 3600
-    return 86400
-
-def _proxy_is_blacklisted(p):
-    try:
-        with open(PROXY_BLACKLIST, encoding="utf-8") as f:
-            bl = json.load(f)
-        if not isinstance(bl, dict): return False
-        if p not in bl: return False
-        e = bl[p]
-        if isinstance(e, dict):
-            ts, fails = int(e.get("ts", 0)), int(e.get("fails", 1))
-            reason = str(e.get("reason", "") or "")
-        else:
-            ts, fails, reason = int(e), 1, ""
-        return (time.time() - ts) < _proxy_bl_tier(fails, reason)
-    except Exception:
-        return False
-
-def _proxy_list(type_):
-    try:
-        with open(os.path.join(PROXY_LIST_DIR, type_ + ".txt"), encoding="utf-8") as f:
-            lines = [l.strip() for l in f if l.strip()]
-        return lines
-    except Exception:
-        return []
-
-def _proxy_score_get(p):
-    try:
-        with open(PROXY_SCORES_FILE, encoding="utf-8") as f:
-            sc = json.load(f)
-        e = sc.get(p)
-        if not isinstance(e, dict): return 50
-        ok, fail = int(e.get("ok", 0)), int(e.get("fail", 0))
-        tot = ok + fail
-        if tot == 0: return 50
-        return round(ok / tot * 100)
-    except Exception:
-        return 50
-
-def _proxy_auto_type():
-    best, best_n = 'http', -1
-    for pt in ('http', 'socks4', 'socks5'):
-        n = 0
-        for l in _proxy_list(pt):
-            if not _proxy_is_blacklisted(l):
-                n += 1
-        if n > best_n:
-            best, best_n = pt, n
-    return best
-
-def _proxy_pick(type_, force_new=False):
-    if type_ == 'auto':
-        type_ = _proxy_auto_type()
-    lines = [l for l in _proxy_list(type_) if not _proxy_is_blacklisted(l)]
-    _tried = getattr(_proxy_pick, "_tried_round", None)
-    if _tried:
-        lines = [l for l in lines if l not in _tried]
-    if not lines: return ""
-    lines.sort(key=lambda p: -_proxy_score_get(p))
-    st = _proxy_load_state()
-    sticky = bool(st and st.get("sticky") and st.get("sticky_enabled") is not False)
-    if sticky:
-        if not force_new and st and st.get("sticky_proxy"):
-            cur = st["sticky_proxy"]
-            if cur in lines and not _proxy_is_blacklisted(cur):
-                return cur
-    rot = (st or {}).get("rotation", "roundrobin")
-    if rot == "random":
-        import random as _r
-        pick = _r.choice(lines)
-    elif rot == "first":
-        pick = lines[0]
-    else:
-        idx = int((st or {}).get("rr_index", 0))
-        pick = lines[idx % len(lines)]
-    if st:
-        old = str(st.get("sticky_proxy") or st.get("last_proxy") or "")
-        st["sticky_proxy"] = pick
-        st["sticky_type"] = type_
-        st["last_live"] = int(time.time())
-        st["last_proxy"] = pick
-        st["rr_index"] = int(st.get("rr_index", 0)) + 1
-        st["rotate_event"] = {"ts": int(time.time()), "by": "cli", "old": old, "new": pick}
-        try:
-            with open(PROXY_STATE_FILE, "w", encoding="utf-8") as f:
-                json.dump(st, f)
-        except Exception: pass
-    return pick
-
-def _proxy_emit_rotate(by, phase, old, new, force_ts=None):
-    try:
-        st = _proxy_load_state()
-        if not st: return
-        ts = int(force_ts) if force_ts else int(time.time() * 1000)
-        prev = (st.get("rotate_event") or {}).get("ts")
-        if prev and ts <= int(prev):
-            ts = int(prev) + 1
-        st["rotate_event"] = {
-            "ts": ts,
-            "by": by,
-            "phase": phase,
-            "old": old or "",
-            "new": new or "",
-        }
-        with open(PROXY_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(st, f)
-    except Exception:
-        pass
-
-
-def _proxy_mark_used(proxy):
-    """Catat proxy yang BENERAN dipakai request/cli terakhir ('' = direct).
-    Tampilan 'proxy aktif' di TUI & WebUI harus baca ini, bukan sticky_proxy
-    yang cuma ke-set saat lewat proxy sukses (stale kalau terakhir direct)."""
-    try:
-        st = _proxy_load_state()
-        if st is None:
-            return
-        st["last_used_proxy"] = proxy or ""
-        st["last_used_at"] = int(time.time())
-        st["last_used_source"] = "cli"
-        with open(PROXY_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(st, f)
-    except Exception:
-        pass
-
-
-def _proxy_score_record(proxy, success):
-    try:
-        try:
-            with open(PROXY_SCORES_FILE, encoding="utf-8") as f:
-                sc = json.load(f)
-        except Exception:
-            sc = {}
-        if not isinstance(sc, dict): sc = {}
-        now = int(time.time())
-        e = sc.get(proxy) or {"ok": 0, "fail": 0}
-        e["ok" if success else "fail"] = int(e.get("ok" if success else "fail", 0)) + 1
-        e["last"] = now
-        sc[proxy] = e
-
-        for _p in list(sc):
-            _el = sc[_p]
-            if not isinstance(_el, dict):
-                del sc[_p]
-                continue
-            _last = int(_el.get("last", 0)) or now
-            _hours = max(0.0, (now - _last) / 3600.0)
-            if _hours >= 1:
-                _mul = max(0.0, 2.0 ** -_hours)
-                _el["ok"] = max(0, int(int(_el.get("ok", 0)) * _mul))
-                _el["fail"] = max(0, int(int(_el.get("fail", 0)) * _mul))
-                _el["last"] = now
-        with open(PROXY_SCORES_FILE, "w", encoding="utf-8") as f:
-            json.dump(sc, f)
-    except Exception: pass
-
-def _proxy_failover(proxy, is_rate_limit=False, blacklist=True):
-    if not proxy: return
-    try:
-        _old_cur = _proxy_load_state() or {}
-        _oc = (_old_cur.get("sticky_proxy") or _old_cur.get("last_proxy") or proxy or "").replace("http://", "")
-        _proxy_emit_rotate("cli", "searching", _oc, "")
-    except Exception: pass
-    if not blacklist:
-        try:
-            st = _proxy_load_state()
-            if st and st.get("sticky_proxy") == proxy:
-                st.pop("sticky_proxy", None)
-                st["rr_index"] = int(st.get("rr_index", 0)) + 1
-                try:
-                    with open(PROXY_STATE_FILE, "w", encoding="utf-8") as f:
-                        json.dump(st, f)
-                except Exception: pass
-        except Exception: pass
-        return
-    _proxy_score_record(proxy, False)
-    if not hasattr(_proxy_pick, "_tried_round"):
-        _proxy_pick._tried_round = set()
-    _proxy_pick._tried_round.add(proxy)
-    try:
-        try:
-            with open(PROXY_BLACKLIST, encoding="utf-8") as f:
-                bl = json.load(f)
-            if not isinstance(bl, dict): bl = {}
-        except Exception:
-            bl = {}
-        old = bl.get(proxy)
-        fails = (int(old.get("fails", 0)) if isinstance(old, dict) else 0) + 1
-        reason = "rl" if is_rate_limit else ""
-        entry = {"ts": int(time.time()), "fails": fails}
-        if reason: entry["reason"] = reason
-        bl[proxy] = entry
-        now = time.time()
-        for p, e in list(bl.items()):
-            f_ = int(e.get("fails", 1)) if isinstance(e, dict) else 1
-            ts_ = int(e.get("ts", 0)) if isinstance(e, dict) else int(e)
-            r_ = str(e.get("reason", "") or "") if isinstance(e, dict) else ""
-            if now - ts_ >= _proxy_bl_tier(f_, r_): del bl[p]
-        try:
-            with open(PROXY_BLACKLIST, "w", encoding="utf-8") as f:
-                json.dump(bl, f)
-        except Exception: pass
-    except Exception: pass
-    st = _proxy_load_state()
-    if st and st.get("sticky_proxy") == proxy:
-        st.pop("sticky_proxy", None)
-        st["rr_index"] = int(st.get("rr_index", 0)) + 1
-        try:
-            with open(PROXY_STATE_FILE, "w", encoding="utf-8") as f:
-                json.dump(st, f)
-        except Exception: pass
-
-def _proxy_cli_latency(proxy):
-    try:
-        host, _, port = proxy.rpartition(":")
-        port = int(port)
-        if not host or port <= 0 or port > 65535: return -1
-        t0 = time.time()
-        s = socket.create_connection((host, port), timeout=5)
-        s.close()
-        return int((time.time() - t0) * 1000)
-    except Exception:
-        return -1
-
-
-def _proxy_request_grab():
-    """Minta proxy-grabber ambil proxy baru SEKALI (background, single-flight,
-    throttle 5 menit via .grab_once.lock) supaya pool cepet dapet isi baru
-    tanpa nunggu jadwal auto-grab berikutnya."""
-    try:
-        _dir = os.path.dirname(PROXY_STATE_FILE)
-        _lock = os.path.join(_dir, ".grab_once.lock")
-        _lf = None
-        try:
-            _lf = open(_lock, "a+", encoding="utf-8")
-            if fcntl is None:
-                raise RuntimeError("fcntl gak tersedia")
-            fcntl.flock(_lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except Exception:
-            try:
-                if _lf:
-                    _lf.close()
-            except Exception:
-                pass
-            return
-        try:
-            _lf.seek(0)
-            _prev = _lf.read().strip()
-            if _prev and (time.time() - float(_prev)) < 300:
-                return
-            _lf.truncate(0)
-            _lf.seek(0)
-            _lf.write(str(time.time()))
-            _lf.flush()
-        finally:
-            try:
-                _lf.close()
-            except Exception:
-                pass
-        _py = os.path.join(_dir, "proxy_grabber.py")
-        if not os.path.isfile(_py):
-            return
-        _out = open(os.path.join(_dir, "run.log"), "ab")
-        subprocess.Popen(
-            [sys.executable, _py, "--once"],
-            cwd=_dir,
-            stdout=_out,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except Exception:
-        pass
-
-
-def _proxy_wait_pool(type_, max_wait=None):
-    """Nunggu pool kebagian proxy baru (TANPA balik ke direct). Cek file pool
-    tiap 4 detik, mintain grabber re-shoot tiap 30 detik. Balikin True begitu
-    ada proxy non-blacklist; False kalau mentok di max_wait."""
-    if max_wait is None:
-        try:
-            max_wait = max(10, int(os.environ.get("AI_PROXY_POOL_WAIT", "120") or 120))
-        except Exception:
-            max_wait = 120
-    t0 = time.time()
-    last_grab = 0
-    while (time.time() - t0) < max_wait:
-        if any(not _proxy_is_blacklisted(l) for l in _proxy_list(type_)):
-            return True
-        if (time.time() - last_grab) >= 30:
-            _proxy_request_grab()
-            last_grab = time.time()
-        time.sleep(4)
-    return False
-
-
-def _proxy_probe_parallel(cands, timeout_ms=4000):
-    """Probe HTTP-CONNECT paralel (threads): tes BENERAN lewat proxy ke
-    endpoint ringan (endpoint AI dari probe_config → fallback gstatic).
-    Endpoint AI dulu: itu egress asli yang dipakai chat & banyak free proxy
-    memblokir CONNECT ke range Google (gstatic) padahal sehat ke target AI.
-    Sebelumnya Cuma TCP-connect, itu yang bikin proxy 'lolos tapi hang' pas
-    dipakai chat. Yang di-pick dijamin bisa nembus TLS/konenksi HTTP ya."""
-    if not cands:
-        return ""
-    try:
-        import urllib3 as _u3
-        from urllib3.exceptions import InsecureRequestWarning as _IRW
-        _u3.disable_warnings(_IRW)
-    except Exception:
-        pass
-    import requests as _rq
-
-    cands = cands[:6]
-    deadline = time.time() + max(1.0, min(int(timeout_ms), 6000)) / 1000.0
-
-    probe_urls = []
-    try:
-        _pc = json.load(open(PROXY_PROBE_FILE, encoding="utf-8"))
-        _pu = str(_pc.get("url") or "").strip()
-        if _pu and "://" in _pu:
-            probe_urls.append(_pu.rstrip("/"))
-    except Exception:
-        pass
-    probe_urls.append("https://www.gstatic.com/generate_204")
-
-    _state = {"found": "", "done": False}
-    _lock = threading.Lock()
-    _ua = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) ProxyProbe/2.0"}
-
-    def _worker(p):
-        try:
-            proxies = {"http": "http://" + p, "https": "http://" + p}
-            _n = len(probe_urls) - 1
-            for i, u in enumerate(probe_urls):
-                if _state["done"]:
-                    return
-                is_zen = ("opencode.ai" in u or "/zen/" in u)
-                try:
-                    r = _rq.get(u, proxies=proxies, timeout=4, verify=is_zen, headers=_ua)
-                    if r.status_code in (200, 204, 401, 403):
-                        with _lock:
-                            if not _state["done"]:
-                                _state["done"] = True
-                                _state["found"] = p
-                        return
-
-                    if i >= _n:
-                        return
-                    continue
-                except (_rq.RequestException, Exception) as e:
-                    if is_zen and ("SSL" in str(e) or "certificate" in str(e).lower() or "CERTIFICATE" in str(e)):
-                        return
-                    if i >= _n:
-                        return
-                    continue
-        except Exception:
-            return
-
-    _threads = []
-    for p in cands:
-        _t = threading.Thread(target=_worker, args=(p,), daemon=True, name="proxy-http-probe")
-        _threads.append(_t)
-        _t.start()
-    while time.time() < deadline and not _state["done"]:
-        time.sleep(0.04)
-    _state["done"] = True
-    for _t in _threads:
-        try:
-            _t.join(timeout=0.4)
-        except Exception:
-            pass
-    return _state["found"]
-
-
-def _proxy_cli_apply(force_new=False, use_proxy=False, force_proxy=False):
-    try:
-        st = _proxy_load_state()
-        if not st:
-            return None
-        mode = st.get("mode", "proxy")
-        if not force_proxy:
-            if mode == "direct":
-                return None
-            if mode == "auto" and not use_proxy:
-                return None
-        type_ = st.get("type", "http")
-        if type_ == "auto":
-            type_ = _proxy_auto_type()
-        if not force_new:
-            sec = _proxy_load_state() or {}
-            sp = str(sec.get("sticky_proxy") or "").replace("http://", "")
-            last_live = int(sec.get("last_live") or 0)
-            if sp and bool(sec.get("sticky")) and (sec.get("sticky_enabled") is not False) and not _proxy_is_blacklisted(sp):
-                if last_live > 0 and (time.time() - last_live) < 600 and sp in _proxy_list(type_):
-                    no_p = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.169.254"
-                    return {"http": "http://" + sp, "https": "http://" + sp, "proxy": sp, "no_proxy": no_p}
-        sec = _proxy_load_state() or {}
-        cur = str(sec.get("sticky_proxy") or "").replace("http://", "")
-        tried = set(getattr(_proxy_pick, "_tried_round", set()) or ())
-        cands = []
-        for l in _proxy_list(type_):
-            if _proxy_is_blacklisted(l):
-                continue
-            if l in tried and l != cur:
-                continue
-            cands.append(l)
-        cands.sort(key=lambda p: -(100 if p == cur else _proxy_score_get(p)))
-
-        def _relist():
-            tried = set(getattr(_proxy_pick, "_tried_round", set()) or ())
-            cur = str((_proxy_load_state() or {}).get("sticky_proxy") or "").replace("http://", "")
-            out = [l for l in _proxy_list(type_) if not _proxy_is_blacklisted(l) and (l not in tried or l == cur)]
-            out.sort(key=lambda p: -(100 if p == cur else _proxy_score_get(p)))
-            return out
-
-        if not cands:
-            _proxy_note("⚠️ Pool proxy kosong / gak ada yang live. Nunggu proxy-grabber ngasih proxy baru, NO direct...", color="yellow")
-            if _proxy_wait_pool(type_):
-                cands = _relist()
-            else:
-                _proxy_note("⚠️ Pool proxy masih kosong setelah menunggu — run CLI di-hold, TANPA direct. Coba lagi.", color="yellow")
-                raise HoldSignal("pool proxy kosong — run CLI di-hold/dibatalkan, TANPA direct")
-        old_cur = (st.get("sticky_proxy") or st.get("last_proxy") or "").replace("http://", "")
-        _said = False
-        _batch = 8
-        while cands:
-            chunk = cands[:_batch]
-            cands = cands[_batch:]
-            p = _proxy_probe_parallel(chunk, 3500 if force_new else 5000)
-            if p:
-                if force_new and p != old_cur:
-                    _proxy_emit_rotate("cli", "picked", old_cur, p)
-                no_p = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.169.254"
-                return {"http": "http://" + p, "https": "http://" + p, "proxy": p, "no_proxy": no_p}
-            for c in chunk:
-                _proxy_failover(c, is_rate_limit=False)
-            if force_new and not _said:
-                _proxy_emit_rotate("cli", "searching", old_cur, "")
-                _said = True
-        _proxy_note("⚠️ Semua kandidat proxy gagal live. Nunggu proxy-grabber ngasih proxy baru, NO direct...", color="yellow")
-        if _proxy_wait_pool(type_):
-            cands = _relist()
-            while cands:
-                chunk = cands[:_batch]
-                cands = cands[_batch:]
-                p = _proxy_probe_parallel(chunk, 5000)
-                if p:
-                    no_p = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.169.254"
-                    return {"http": "http://" + p, "https": "http://" + p, "proxy": p, "no_proxy": no_p}
-                for c in chunk:
-                    _proxy_failover(c, is_rate_limit=False)
-        raise HoldSignal("pool proxy kosong setelah nunggu — run CLI di-hold/dibatalkan, TANPA direct")
-    except HoldSignal:
-        raise
-    except Exception:
-        return None
-
+    return {}
 
 def _proxy_apply(force_new=False, use_proxy=False, force_proxy=False):
-    st = _proxy_load_state()
-    if not st: return None
-    mode = st.get("mode", "proxy")
-    if not force_proxy:
-        if mode == "direct": return None
-        if mode == "auto" and not use_proxy: return None
-    type_ = st.get("type", "http")
-    if type_ == 'auto':
-        type_ = _proxy_auto_type()
-    p = _proxy_pick(type_, force_new)
-    if not p:
+    return {}
 
-        _proxy_note("⚠️ Pool proxy kosong / gak ada yang live. Nunggu proxy-grabber ngasih proxy baru, NO direct...", color="yellow")
-        if _proxy_wait_pool(type_):
-            p = _proxy_pick(type_, True)
-        else:
-            _proxy_note("⚠️ Pool proxy masih kosong setelah menunggu — request di-hold, TANPA direct. Coba lagi.", color="yellow")
-            raise HoldSignal(f"pool proxy kosong ({type_}) — request di-hold, TANPA direct")
-    if not p:
-        raise HoldSignal(f"pool proxy kosong ({type_}) — request di-hold, TANPA direct")
-    return {"http": "http://" + p, "https": "http://" + p}
+def _proxy_cli_apply(force_new=False, use_proxy=False, force_proxy=False):
+    return {}
 
-_PROXY_IDLE_BUF = []
-_PROXY_IDLE_LOCK = threading.Lock()
-_PROXY_IDLE_FLUSH_T = None
+def _proxy_pick(type_, force_new=False):
+    return ""
 
+def _proxy_failover(proxy, is_rate_limit=False, blacklist=True):
+    return None
 
-def _proxy_flush_idle_box():
-    global _PROXY_IDLE_FLUSH_T
-    try:
-        time.sleep(1.0)
-    except Exception:
-        pass
-    with _PROXY_IDLE_LOCK:
-        _PROXY_IDLE_FLUSH_T = None
-        if not _PROXY_IDLE_BUF:
-            return
-        lines = list(_PROXY_IDLE_BUF)
-        _PROXY_IDLE_BUF.clear()
-    try:
-        console.print()
-        console.print(Panel(
-            Group(*lines),
-            title=Text("🕵️ PROXY", style="bold " + THEME["cyan"]),
-            title_align="left",
-            box=_BOX_BOTTOM2,
-            border_style=THEME["chat_border"] or THEME["muted"],
-            padding=(0, 1),
-        ))
-        console.print()
-    except Exception:
-        pass
+def _proxy_mark_used(proxy):
+    return None
 
-
-def _proxy_schedule_idle_flush():
-    global _PROXY_IDLE_FLUSH_T
-    with _PROXY_IDLE_LOCK:
-        if _PROXY_IDLE_FLUSH_T is not None:
-            return
-        _t = threading.Thread(target=_proxy_flush_idle_box, daemon=True, name="proxy-idle-flush")
-        _PROXY_IDLE_FLUSH_T = _t
-    try:
-        _t.start()
-    except Exception:
-        with _PROXY_IDLE_LOCK:
-            _PROXY_IDLE_FLUSH_T = None
-
+def _proxy_score_record(proxy, success):
+    return None
 
 def _proxy_note(text, icon="", color="cyan"):
-    t = str(text or "").strip()
-    if not t:
-        return
-    if _ACTIVE_TREE is not None:
-        try:
-            _ACTIVE_TREE.proxy_status(t, icon, color)
-            return
-        except Exception:
-            pass
-    try:
-        _line = Text("  ", style=THEME["muted"])
-        if icon:
-            _line.append(str(icon) + " ", style=THEME["cyan"])
-        _line.append(t, style=THEME.get(color, color) or THEME["cyan"])
-    except Exception:
-        _line = Text("  " + (str(icon) + " " if icon else "") + t,
-                     style=THEME.get(color, color) or THEME["cyan"])
-    with _PROXY_IDLE_LOCK:
-        _PROXY_IDLE_BUF.append(_line)
-        if len(_PROXY_IDLE_BUF) > 4:
-            del _PROXY_IDLE_BUF[0]
-    _proxy_schedule_idle_flush()
-
-def _proxy_watch_webui_rotate():
-    last_ts = None
-    last_sticky = object()
-    while True:
-        try:
-            st = _proxy_load_state()
-            cur = ""
-            if st:
-
-                last_used = st.get("last_used_proxy")
-                if isinstance(last_used, str) and (last_used or st.get("last_used_at")):
-                    cur = last_used if last_used else "__DIRECT__"
-                else:
-                    cur = str(st.get("sticky_proxy") or st.get("last_proxy") or "").strip()
-                ev = st.get("rotate_event")
-                if isinstance(ev, dict) and ev.get("ts"):
-                    ts = int(ev.get("ts", 0))
-                    if ts != last_ts:
-                        last_ts = ts
-                        by = str(ev.get("by") or "webui")
-                        old = str(ev.get("old") or "").strip()
-                        new = str(ev.get("new") or "").strip()
-                        phase = str(ev.get("phase") or "")
-                        if phase == "searching":
-                            _proxy_note(f"💤 Proxy lemot, cari proxy baru…", color="yellow")
-                        elif new:
-                            _proxy_note(f"✅ terhubung proxy → {new}", color="green")
-                        elif old:
-                            _proxy_note(f"♻️ ganti proxy (dari {old})", color="yellow")
-                        if new:
-                            last_sticky = new
-            if cur and cur != last_sticky:
-                last_sticky = cur
-                if cur == "__DIRECT__":
-                    _proxy_note("⛔ request terakhir: koneksi langsung", color="yellow")
-                else:
-                    _proxy_note(f"🌐 proxy aktif: {cur}", color="green")
-        except Exception:
-            pass
-        time.sleep(2)
+    return None
 
 _REASONING_TAGS = ("REASONING_SCRATCHPAD", "think", "thinking", "reasoning", "thought")
 _TOOL_CALL_TAGS = ("tool_call", "tool_calls", "tool_result", "function_call", "function_calls")
@@ -3004,66 +2412,26 @@ class Agent:
             body["stream"] = True
 
         try:
-            _prx = _proxy_apply(
-                force_new=getattr(self, "_proxy_fail_next", False),
-                use_proxy=getattr(self, "_use_proxy", False),
-                force_proxy=getattr(self, "_force_proxy", False)
-            )
+            # PROXY-FREE: request selalu direct.
             self._proxy_fail_next = False
-
-            if _prx:
-                self._cur_proxy = (_prx.get("https") or "").replace("http://", "")
-                _proxy_mark_used(self._cur_proxy)
-                r = requests.post(
-                    self.cfg["ENDPOINT"],
-                    headers=_get_headers(self.cfg),
-                    json=body,
-                    timeout=_req_timeout,
-                    proxies=_prx,
-                    stream=_stream
-                )
-            else:
-                _proxy_mark_used("")
-                r = requests.post(
-                    self.cfg["ENDPOINT"],
-                    headers=_get_headers(self.cfg),
-                    json=body,
-                    timeout=_req_timeout,
-                    stream=_stream
-                )
+            r = requests.post(
+                self.cfg["ENDPOINT"],
+                headers=_get_headers(self.cfg),
+                json=body,
+                timeout=_req_timeout,
+                stream=_stream
+            )
 
         except requests.exceptions.SSLError as e:
-            if self._cur_proxy:
-                _proxy_failover(self._cur_proxy, is_rate_limit=False)
-                self._proxy_fail_next = True
-                self._use_proxy = True
-                raise OverloadedError(f"proxy SSL error ({e}) → rotate", retry_after=5, status=0)
-
             if not getattr(self, "_force_proxy", False):
                 self._force_proxy = True
-                self._use_proxy = True
                 self._proxy_fail_next = True
-                raise OverloadedError(f"direct SSL error ({e}) → coba proxy", retry_after=5, status=0)
+                raise OverloadedError(f"direct SSL error ({e}) → coba lagi", retry_after=5, status=0)
 
             raise HoldSignal(f"SSL error: {str(e)}")
 
         except requests.exceptions.RequestException as e:
-            if self._cur_proxy:
-                _proxy_failover(self._cur_proxy, is_rate_limit=False)
-                self._proxy_fail_next = True
-                self._use_proxy = True
-                raise OverloadedError(f"proxy error ({e}) → rotate", retry_after=5, status=0)
             raise HoldSignal(f"HTTP Request Timeout / Terputus: {str(e)}")
-
-        if self._cur_proxy:
-            _proxy_score_record(self._cur_proxy, True)
-            if time.monotonic() - _t0 > PROXY_SLOW_S:
-                _slow = self._cur_proxy
-                _proxy_failover(_slow, is_rate_limit=False, blacklist=False)
-                self._proxy_fail_next = True
-                try:
-                    _proxy_note(f"🐌 Proxy lemot ({int(time.monotonic()-_t0)}s) — jawaban kepake, request berikut ganti rute.", color="yellow")
-                except Exception: pass
 
         if not r.ok:
             try:
@@ -3225,10 +2593,6 @@ class Agent:
                         acc["args"] += fn["arguments"]
 
         except requests.exceptions.RequestException as e:
-            if self._cur_proxy:
-                _proxy_failover(self._cur_proxy, is_rate_limit=False)
-                self._proxy_fail_next = True
-                self._use_proxy = True
             raise OverloadedError(f"stream error ({e}) → retry", retry_after=5, status=0)
 
         finally:
@@ -3360,33 +2724,12 @@ class Agent:
 
     def _llm_retry(self, msgs, tree=None, on_delta=None, on_thought=None):
         attempt = 0
-        _proxy_pick._tried_round = set()
 
         while True:
             try:
                 return self._llm(msgs, on_delta=on_delta, on_thought=on_thought)
             except OverloadedError as e:
                 _rl_learn_from_error(_rl_key(self.cfg), str(e))
-
-                if self._cur_proxy:
-                    _soft = bool(getattr(e, "_soft", False))
-                    _proxy_failover(self._cur_proxy, is_rate_limit=("429" in str(e) or "rate" in str(e).lower()), blacklist=not _soft)
-                    self._proxy_fail_next = True
-                    self._use_proxy = True
-                    attempt += 1
-
-                    if attempt >= PROXY_MAX_RETRY:
-                        raise HoldSignal(f"semua proxy gagal ({attempt}x): {str(e)[:80]}")
-
-                    if tree:
-                        tree.done("🔄", "yellow")
-                        _err = " ".join(str(e).split())
-                        _err = _err if len(_err) <= 45 else _err[:44] + "…"
-                        if _soft:
-                            tree.below(f"[yellow]🤔 Server mikir kelamaan — proxy sehat, TANPA blacklist:[/yellow] [cyan]{escape(self._cur_proxy)}[/cyan]")
-                        else:
-                            tree.below(f"[yellow]🌐 Proxy ganti:[/yellow] [cyan]{escape(self._cur_proxy)}[/cyan]")
-                    continue
 
                 if self._fo_try(tree):
                     continue
@@ -3735,31 +3078,8 @@ class Agent:
             env = dict(os.environ)
             env["XDG_CONFIG_HOME"] = os.path.join(PROJECT_ROOT, "opencode-bin", ".cfg_home")
             env["XDG_DATA_HOME"] = os.path.join(PROJECT_ROOT, "opencode-bin", ".data_home")
-            prx_disp = ""
-            prx = _proxy_cli_apply(
-                force_new=force_new or getattr(self, "_proxy_fail_next", False),
-                use_proxy=getattr(self, "_use_proxy", False),
-                force_proxy=getattr(self, "_force_proxy", False),
-            )
-
-            if prx:
-                pu = prx.get("https") or prx.get("http") or ""
-                if pu:
-                    no_p = prx.get("no_proxy") or "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.169.254"
-                    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-                        env[k] = pu
-                    env["NODE_USE_ENV_PROXY"] = "1"
-                    for k in ("NO_PROXY", "no_proxy"):
-                        env[k] = no_p
-                    prx_disp = pu
-
-            _proxy_mark_used(prx_disp)
-
-            try:
-                _p_hang = int(os.environ.get("DEBZ_PROXY_HANG_S", "25") or 25)
-            except Exception:
-                _p_hang = 25
-            stall_lim = ((min(20, _p_hang) if prx_disp else 120) if fast else (_p_hang if prx_disp else 240))
+            # PROXY-FREE: opencode CLI selalu direct, tanpa env proxy.
+            stall_lim = 120 if fast else 240
 
             import json as _json
             import socket as _sock
@@ -4118,8 +3438,8 @@ class Agent:
                     stall = now - _last_act
 
                     if stall > stall_lim:
-                        reason = "proxy_hang" if prx_disp else "direct_stall"
-                        log_debug(f"OC_CLI_STALL: {reason} stall={stall:.0f}s limit={stall_lim}s via={prx_disp or 'direct'}")
+                        reason = "direct_stall"
+                        log_debug(f"OC_CLI_STALL: {reason} stall={stall:.0f}s limit={stall_lim}s via=direct")
                         _oc_kill(proc)
                         break
 
@@ -4194,14 +3514,7 @@ class Agent:
 
             fail = False
 
-            if reason == "proxy_hang":
-                if prx_disp:
-                    _proxy_failover(prx_disp.replace("http://", ""), is_rate_limit=False)
-                    self._proxy_fail_next = True
-                et = f"proxy hang ({stall_lim} detik tanpa progres) via {prx_disp or 'direct'}"
-                _msg_proxy(f"proxy hang — {stall_lim}s tanpa progres via {prx_disp or 'direct'} · failover", icon="⚠️", color="red")
-                fail = True
-            elif reason == "direct_stall":
+            if reason == "direct_stall":
                 et = f"direct stall ({stall_lim} detik tanpa progres) → proses dihentikan"
                 _msg("[red]⚠ direct stall → proses dihentikan[/red]")
                 fail = True
@@ -4209,17 +3522,12 @@ class Agent:
                 et = f"cli timeout (deadline rolling {t_oc_deadline}s / cap 1800s) → proses dihentikan"
                 _msg_proxy("cli timeout → proses dihentikan", icon="⚠️", color="red")
                 fail = True
-            elif prx_disp and ft.strip():
-                _proxy_score_record(prx_disp.replace("http://", ""), True)
-                self._proxy_fail_next = False
-                self._cur_proxy = prx_disp.replace("http://", "")
 
             return ft, et, fail
 
         try:
             final_txt, err_txt = "", ""
             stalls = 0
-            _proxy_pick._tried_round = set()
 
             prev_ctx = ""
             if not getattr(self, "_oc_session", "") and len(getattr(self, "history", []) or []) > 1:
@@ -4243,8 +3551,7 @@ class Agent:
                     stalls += 1
                     self._oc_session = ""
                     if attempt < 3:
-                        _px = getattr(self, '_cur_proxy', '') or ''
-                        _msg_proxy(f"coba lagi ({attempt + 1}/4{', ganti proxy' if _px else ''})…", icon="🔄", color="yellow")
+                        _msg_proxy(f"coba lagi ({attempt + 1}/4)…", icon="🔄", color="yellow")
                         continue
                     return f"⚠️ opencode CLI: {et}"
 
@@ -4980,11 +4287,6 @@ def main():
     ui.banner(cfg, agent.tools_on)
     threading.Thread(target=lambda: fetch_all_models(cfg), daemon=True).start()
 
-    try:
-        threading.Thread(target=_proxy_watch_webui_rotate, daemon=True).start()
-    except Exception:
-        pass
-
     style = Style.from_dict({
         "prompt.border": f"{THEME['border']}",
         "prompt.label": f"{THEME['retro_orange_bright']}",
@@ -5100,24 +4402,14 @@ def main():
 
         elif c_line == "/status":
             console.print("  [dim]" + "-" * 36 + "[/dim]")
-            try:
-                _st = _proxy_load_state()
-                _lu = (_st or {}).get("last_used_proxy")
-                if isinstance(_lu, str) and (_lu or (_st or {}).get("last_used_at")):
-                    _cur = _lu if _lu else "DIRECT"
-                else:
-                    _cur = (_st or {}).get("sticky_proxy") or (_st or {}).get("last_proxy") or "-"
-            except Exception:
-                _cur = "-"
+            # PROXY-FREE BUILD: selalu direct, tidak ada pool.
+            _cur = "DIRECT"
 
             console.print(f"  [cyan]model[/cyan]    {cfg['MODEL']}")
             if cfg.get("_PROV_ID"):
                 console.print(f"  [cyan]provider[/cyan]  [magenta]{cfg.get('_PROV_ID')}[/magenta]")
 
-            if _cur != "-":
-                console.print(f"  [cyan]routing[/cyan]  {cfg.get('_ROUTING', 'fixed')}\n  [cyan]proxy[/cyan]     [bold green]{_cur}[/bold green]")
-            else:
-                console.print(f"  [cyan]routing[/cyan]  {cfg.get('_ROUTING', 'fixed')}\n  [cyan]proxy[/cyan]     {_cur}")
+            console.print(f"  [cyan]routing[/cyan]  {cfg.get('_ROUTING', 'fixed')}\n  [cyan]proxy[/cyan]     {_cur}")
 
             console.print(f"  [cyan]tools[/cyan]     " + ("[bold green]ON[/bold green]" if agent.tools_on else "[bold red]OFF[/bold red]"))
             console.print(f"  [cyan]version[/cyan]  c0n73xt v{VERSION}\n  [cyan]UA[/cyan]      {_get_headers(cfg).get('User-Agent')}\n  [cyan]turns[/cyan]    {len(agent.history) // 2}")

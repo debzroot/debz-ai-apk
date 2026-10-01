@@ -672,39 +672,8 @@ if(isset($_GET['action'])&& $_GET['action']=== 'approval_mode') {
 }
 if(isset($_GET['action'])&& $_GET['action']=== 'proxy_next') {
     header('Content-Type: application/json');
-    if($_SERVER['REQUEST_METHOD']!== 'POST') {
-        http_response_code(405);
-        echo json_encode(['error' => 'POST aja']);
-        exit;
-    }require_once __DIR__.'/agent.php';
-    $st = debz_proxy_load_state();
-    if(! $st) {
-        http_response_code(404);
-        echo json_encode(['error' => 'proxy_state.json gak ada / belum di-grab','state' => null]);
-        exit;
-    }$old = (string)($st['sticky_proxy']?? '');
-    if($old !== '') {
-        debz_proxy_failover($old);
-        applog('PROXY','manual_next',['old' => $old]);
-    }else {
-        debz_proxy_state_update(function(array $s)use($st): array {
-            $s['rr_index']= (int)($st['rr_index']?? $s['rr_index']?? 0)+ 1;
-            return $s;
-        });
-    }$type = (string)($st['type']?? 'http');
-    if($type === 'auto')$type = debz_proxy_auto_type();
-    $pk = debz_proxy_pick_live($type,true);
-    $proxy = $pk['proxy'];
-    $usedType = ($pk['usedType']?? '')!== ''? $pk['usedType']: $type;
-    $st2 = debz_proxy_load_state()??[];
-    $poolN = 0;
-    $lf2 = debz_proxy_list_file($usedType);
-    $raw2 = is_file($lf2)? @ file($lf2,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES):[];
-    if(is_array($raw2))foreach($raw2 as $ln) {
-        $ln = trim((string)$ln);
-        if($ln !== '' && ! debz_proxy_is_blacklisted($ln))$poolN ++;
-    }
-    echo json_encode(['success' => true,'old' => $old,'proxy' => $proxy,'sticky' => (string)($st2['sticky_proxy']?? ''),'sticky_type' => (string)($st2['sticky_type']?? $usedType),'rr_index' => (int)($st2['rr_index']?? 0),'mode' => (string)($st2['mode']?? 'proxy'),'type' => $usedType,'rotation' => (string)($st2['rotation']?? 'roundrobin'),'pool_size' => $poolN,'message' => $proxy !== ''? 'Proxy diganti: '.$proxy: 'Pool kosong — nunggu proxy-grabber, TANPA direct',],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    http_response_code(410);
+    echo json_encode(['error' => 'proxy dihapus (PROXY-FREE BUILD): semua request direct, tidak ada pool']);
     exit;
 }
 if(isset($_GET['action'])&& $_GET['action']=== 'model') {
