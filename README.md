@@ -3,6 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Android](https://img.shields.io/badge/Platform-Android-brightgreen.svg)](app/)
 [![Backend: proot-mini](https://img.shields.io/badge/Backend-proot--mini-blue.svg)](rootfs/)
+[![Release: ci-latest](https://img.shields.io/github/v/release/debzroot/debz-ai-apk?display_name=tag&include_prereleases&label=ci-latest)](https://github.com/debzroot/debz-ai-apk/releases/tag/ci-latest)
+[![Stars](https://img.shields.io/github/stars/debzroot/debz-ai-apk?style=social)](https://github.com/debzroot/debz-ai-apk/stargazers)
+
+> ⭐ **Kalau project ini berguna, kasih Star ya — biar makin semangat maintain!**
+> Klik ⭐ di kanan atas repo ini. Gratis, tapi ngaruh banget.
 
 **DebzAI** adalah asisten AI mobile opensource khusus Android: APK native ringan yang membawa
 agent AI langsung di HP — bisa ngoding, eksekusi tool, otomatisasi, dan akses sistem —
@@ -52,14 +57,56 @@ tanpa perlu VPS atau API key mahal.
 ## Arsitektur singkat
 
 ```text
-app/ (native: MainActivity, TerminalActivity, BootstrapService,
-      PortManager, RootDetector, OtaManager, RootfsManager, BridgeServer)
-backend/ (php-fpm + nginx serve /opt/debz/app: index.php WebUI,
-      agent.php, api.php, providers.php, debz-term.py,
-      backend.py :tools, debz_tools_mcp.py, cua/browser drivers,
-      skills/*/SKILL.md, AGENTS.md, notes.db auto-seed)
-rootfs/ (build-rootfs.sh: ubuntu-base ARM64 + php + nginx + python wheels
-      + opencode binary + payload /opt/debz → rootfs-mini.tar.gz)
+debz-ai-apk/
+├── app/                                # Native Android (Java)
+│   └── src/main/java/ai/debz/
+│       ├── MainActivity.java           # WebView + UI utama
+│       ├── TerminalActivity.java       # Terminal proot
+│       ├── BootstrapService.java       # Foreground service
+│       ├── StackSupervisor.java        # Orchestrator stack backend
+│       ├── PortManager.java            # Port dinamis anti-bentrok
+│       ├── RootfsManager.java          # Extract + ROOTFS_EPOCH wipe
+│       ├── ProotManager.java           # Lifecycle proot-mini
+│       ├── OtaManager.java             # Poll OTA ci-latest
+│       ├── RootDetector.java           # Deteksi root
+│       ├── BridgeServer.java           # Eksekusi root (8098)
+│       ├── DebzConfig.java             # Konstanta config
+│       └── ...
+├── backend/                            # PHP + Python (jalan di proot /opt/debz/app)
+│   ├── index.php                       # WebUI (login 1337)
+│   ├── c0n73xt.js / c0n73xt.css        # Frontend chat + sidebar Tools/AllowAll
+│   ├── agent.php                       # Planner → worker → verifier
+│   ├── agent-helpers.php               # Helper agent
+│   ├── api.php                         # REST /api/* (WebUI ↔ backend)
+│   ├── providers.php                   # Provider chain + failover
+│   ├── debz-term.py                    # Orkestrator opencode-cli (RULES WAJIB)
+│   ├── backend.py                      # 22 tools Flask (:tools dinamis)
+│   ├── debz_tools_mcp.py               # MCP server (shell/file/browser)
+│   ├── cua_driver.py + cua_mcp.py      # Layar virtual (computer_use)
+│   ├── browser.py + cdp_chrome.py      # Browser automation (CDP)
+│   ├── skills/*/SKILL.md               # Skill modular
+│   ├── AGENTS.md                       # Canonical agent (single source of truth)
+│   └── opencode-bin/
+│       └── .cfg_home/opencode/
+│           └── opencode.jsonc          # Config + instructions
+├── rootfs/                             # Builder rootfs-mini.tar.gz (~130MB)
+│   ├── build-rootfs.sh                 # ubuntu-base ARM64 + php/nginx/python
+│   ├── fetch-arm64-debs.py             # Fetch .deb ARM64
+│   └── opt-debz/                       # Payload → /opt/debz di HP
+└── .github/workflows/build.yml         # CI: rootfs → APK → Release ci-latest
+```
+
+Alur runtime di HP:
+
+```text
+APK dibuka
+  └─► RootfsManager (cek EPOCH → extract bila perlu)
+        └─► BootstrapService + StackSupervisor
+              ├── php-fpm (backend/*.php)
+              ├── nginx (WebUI :web dinamis)
+              ├── backend.py (tools :tools dinamis)
+              └── opencode serve (:api 8092)
+                    └─► WebView ↔ WebUI ↔ agent ↔ tools ↔ BridgeServer (root)
 ```
 
 - `backend/` di-copy ke `$ROOTFS/opt/debz/app` saat build (lihat `rootfs/build-rootfs.sh` langkah 6).
@@ -98,7 +145,19 @@ rootfs/ (build-rootfs.sh: ubuntu-base ARM64 + php + nginx + python wheels
 
 Kalau APK ini ngebantu kerja mobile kamu, traktir kopi biar lanjut stabil:
 
-**[Donate via Saweria — https://saweria.co/debzroot](https://saweria.co/debzroot)**
+<p align="center">
+  <a href="https://saweria.co/debzroot" target="_blank">
+    <img src="https://img.shields.io/badge/Saweria-Traktir_Kopi_%E2%98%95-orange?style=for-the-badge&logo=coffee&logoColor=white" alt="Traktir via Saweria" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/debzroot/debz-ai-apk/stargazers">
+    <img src="https://img.shields.io/github/stars/debzroot/debz-ai-apk?style=social" alt="Star repo ini" />
+  </a>
+  <br />
+  <sub>⭐ Jangan lupa kasih <b>Star</b> kalau project ini berguna — 1 klik, bikin maintain makin rajin update.</sub>
+</p>
 
 ## Lisensi
 
