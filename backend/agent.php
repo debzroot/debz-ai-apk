@@ -750,15 +750,18 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     elseif($ocTurns > 24 && ($ocTurns% 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
     // AUTO-ROTATE card: serve session berat di-fresh-kan. Konteks kartu cuma
     // hidup di serve, jadi summary WAJIB ditempel ke pesan pertama.
-    if($ocTurns >= 20 && $openSession !== '') {
+    // Trigger: >=20 turn ATAU turn sebelumnya >=250k tokens. Thread UI tetap sama.
+    $tokWhy = ($openSession !== '')? oc_need_rotate_by_tokens($threadId): '';
+    if(($ocTurns >= 20 || $tokWhy !== '') && $openSession !== '') {
         $resumePack = oc_auto_handoff_summary($P,$messagesIn);
         if($mapFile !== '')@ unlink($mapFile);
         $openSession = '';
         if($resumePack !== '')$userText = $resumePack."\n\nPESAN BARU:\n".$userText;
-        oc_emit_handoff($threadId,$ocTurns,'auto-rotate serve fresh, konteks terakhir dibawa','handoff_rotated');
+        oc_emit_handoff($threadId,$ocTurns,'auto-rotate serve fresh'.($tokWhy !== ''? ' ('.$tokWhy.')': '').', konteks terakhir dibawa','handoff_rotated');
         if(function_exists('termEmit'))termEmit('info','🧬 Auto-handoff: serve session di-fresh-kan. Lanjut!');
-        if(function_exists('applog'))applog('OPENCODE_CARD','auto_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'summary' => $resumePack !== ''? strlen($resumePack): 0]);
+        if(function_exists('applog'))applog('OPENCODE_CARD','auto_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'tokens' => $tokWhy,'summary' => $resumePack !== ''? strlen($resumePack): 0]);
         $ocTurns = oc_thread_bump($threadId,'');
+        oc_thread_note_usage($threadId,0,0);
     }
     $serverUrl = rtrim((string)($serveCfg['url']?? ''),'/');
     if($serverUrl === '')$serverUrl = 'http://127.0.0.1:'.(int)($serveCfg['port']?? 4096);
@@ -1117,6 +1120,31 @@ function oc_thread_bump(string $threadId,string $openSession): int {
     @ file_put_contents($f,json_encode($m),LOCK_EX);
     return (int)$m['turns'];
 }
+// AUTO-ROTATE berbasis tokens: tiap turn yang >=250k total / >=200k single-step
+// nyatet ke meta, turn BERIKUTNYA auto fresh-serve + summary. Halaman chat (threadId)
+// tetap sama — konteks nyambung via ringkasan 6 pesan terakhir.
+function oc_thread_note_usage(string $threadId,int $stepInMax,int $usageTotal): void {
+    if($threadId === '')return;
+    $f = oc_thread_meta_file($threadId);
+    $m = is_file($f)? @ json_decode((string)@ file_get_contents($f),true): [];
+    if(! is_array($m))$m = [];
+    $m['last_step_in'] = $stepInMax;
+    $m['last_total'] = $usageTotal;
+    $m['updated'] = date('c');
+    @ file_put_contents($f,json_encode($m),LOCK_EX);
+}
+function oc_thread_last_tokens(string $threadId): array {
+    if($threadId === '')return [0,0];
+    $m = is_file(oc_thread_meta_file($threadId))? @ json_decode((string)@ file_get_contents(oc_thread_meta_file($threadId)),true): [];
+    if(! is_array($m))return [0,0];
+    return [(int)($m['last_step_in']?? 0),(int)($m['last_total']?? 0)];
+}
+function oc_need_rotate_by_tokens(string $threadId): string {
+    [$si,$tt] = oc_thread_last_tokens($threadId);
+    if($si >= 200000)return 'single-step ≈'.number_format($si).' tokens';
+    if($tt >= 250000)return 'total ≈'.number_format($tt).' tokens';
+    return '';
+}
 function oc_resume_cmd(string $threadId,int $turns): string {
     $short = substr($threadId,0,8);
     return 'Lanjutin dari sesi '.$short.' ('.$turns.' pesan): baca HANDOFF terakhir + git status + git diff --stat dulu, terus kerjain sisa TODO tanpa ngulang yang udah beres.';
@@ -1165,18 +1193,24 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     if($ocTurns === 16)oc_emit_handoff($threadId,$ocTurns,'mulai penuh');
     elseif($ocTurns === 24)oc_emit_handoff($threadId,$ocTurns,'berat, rawan socket putus');
     elseif($ocTurns > 24 && ($ocTurns% 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
-    // AUTO-ROTATE: sesi CLI berat (>=20 turn) di-reset fresh + summary dibawa
-    // sebagai konteks. UI tetap sesi yang sama — user tinggal lanjut, anti
-    // opencode error sesi panjang.
-    if($ocTurns >= 20 && $openSession !== '') {
+    // AUTO-ROTATE: sesi CLI berat (>=20 turn ATAU turn lalu >=250k tokens)
+    // di-reset fresh + summary dibawa sebagai konteks. UI tetap sesi yang sama —
+    // user tinggal lanjut, anti opencode error sesi panjang. Summary ditempel ke
+    // userText (CLI cuma kirim userText, bukan messagesIn) + messagesIn.
+    $tokWhyCli = ($openSession !== '')? oc_need_rotate_by_tokens($threadId): '';
+    if(($ocTurns >= 20 || $tokWhyCli !== '') && $openSession !== '') {
         $resumePack = oc_auto_handoff_summary($P,$messagesIn);
         if($mapFile !== '')@ unlink($mapFile);
         $openSession = '';
-        if($resumePack !== '')array_unshift($messagesIn,['role' => 'system','content' => $resumePack]);
-        oc_emit_handoff($threadId,$ocTurns,'auto-rotate sesi fresh, konteks terakhir dibawa','handoff_rotated');
+        if($resumePack !== '') {
+            $userText = $resumePack."\n\nPESAN BARU:\n".$userText;
+            array_unshift($messagesIn,['role' => 'system','content' => $resumePack]);
+        }
+        oc_emit_handoff($threadId,$ocTurns,'auto-rotate sesi fresh'.($tokWhyCli !== ''? ' ('.$tokWhyCli.')': '').', konteks terakhir dibawa','handoff_rotated');
         if(function_exists('termEmit'))termEmit('info','🧬 Auto-handoff: sesi CLI di-fresh-kan, konteks penting dibawa. Lanjut!');
-        if(function_exists('applog'))applog('OPENCODE_CLI','auto_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'summary' => $resumePack !== ''? strlen($resumePack): 0]);
+        if(function_exists('applog'))applog('OPENCODE_CLI','auto_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'tokens' => $tokWhyCli,'summary' => $resumePack !== ''? strlen($resumePack): 0]);
         $ocTurns = oc_thread_bump($threadId,'');
+        oc_thread_note_usage($threadId,0,0);
     }
     $userText = trim((string)$userText);
     if($userText === '') {
@@ -1344,13 +1378,14 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 }
                 switch($t) {
                     case 'step_start': $it = (int)($part['iterations']?? 0);
+                    $stepCount ++;
+                    $dispN = $stepCount;
                     if(! $thinkingSent) {
-                        if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking','iter' => $it + 1]);
+                        if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking','iter' => $dispN]);
                         $thinkingSent = true;
                     }
-                    if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => '🚚💨💨 Di Proses '.((int)$it + 1)]);
-                    if(function_exists('emit'))emit(['type' => 'step','n' =>((int)$it + 1)]);
-                    $stepCount ++;
+                    if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => '🚚💨💨 Di Proses '.$dispN]);
+                    if(function_exists('emit'))emit(['type' => 'step','n' => $dispN]);
                     $touchProgress();
                     break;
                     case 'reasoning': if(isset($part['text'])&& $part['text']!== '' && function_exists('emit')) {
@@ -1496,6 +1531,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Agent berhenti otomatis — output teks yang sama diulang terus** (loop verbal, langkah ".$stepCount.").\n\nTool yang dipakai berulang tidak dianggap loop — biarin aja jalan.\n"]]]]);
                 if(function_exists('termEmit'))termEmit('error','Loop terdeteksi, proses CLI dihentikan.');
             }
+            if(function_exists('oc_thread_note_usage'))oc_thread_note_usage($threadId,$stepInMax,$usageTotal);
             if(function_exists('emitDone'))emitDone();
             return;
         }$stdoutBuf .= (string)@ stream_get_contents($pipes[1]);
@@ -1534,6 +1570,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         }
         $usageOut = max($usageOut,0);
         $usageIn = max($usageIn,0);
+        if(function_exists('oc_thread_note_usage'))oc_thread_note_usage($threadId,$stepInMax,$usageTotal);
         if($usageTotal > 0 && function_exists('emit')) {
             emit(['type' => 'usage','input_tokens' => $usageIn,'output_tokens' => $usageOut,'total_tokens' => $usageTotal]);
         }
