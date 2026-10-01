@@ -58,6 +58,13 @@ android {
         }
     }
 
+    // Sideload-only, BUKAN Google Play: targetSdk 28 disengaja (hak exec
+    // SELinux, lihat komen di defaultConfig). Aturan Play
+    // ExpiredTargetSdkVersion dimatikan; vital check lain tetap jalan.
+    lint {
+        disable += "ExpiredTargetSdkVersion"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
