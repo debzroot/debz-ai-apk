@@ -62,10 +62,22 @@ tar -xzf "$WORK/opencode.tgz" -C "$ROOTFS/opt/opencode"
 
 echo ">> [5/7] wheels python (aarch64-correct, install saat first-boot)"
 mkdir -p "$WHEELS"
-pip download --dest "$WHEELS" \
-  --platform manylinux2014_aarch64 --python-version 3.12 \
-  --implementation cp --abi cp312 --only-binary=:all: \
-  flask flask-cors flask-sock requests rich prompt_toolkit beautifulsoup4
+# files.pythonhosted.org kadang stall di tengah file (pernah mati di
+# rich 310KB) -> pip mati exit 2. Retry level-shell 3x; flag pip-nya
+# sendiri juga dinaikkan (default timeout 15s retries 5 terlalu ketat).
+PIP_OK=0
+for try in 1 2 3; do
+  if pip download --dest "$WHEELS" --timeout 30 --retries 5 \
+    --platform manylinux2014_aarch64 --python-version 3.12 \
+    --implementation cp --abi cp312 --only-binary=:all: \
+    flask flask-cors flask-sock requests rich prompt_toolkit beautifulsoup4; then
+    PIP_OK=1
+    break
+  fi
+  echo "   ! pip download gagal (coba $try/3), ulang 10 dtk..."
+  sleep 10
+done
+[ "$PIP_OK" = "1" ] || { echo "::error::pip download gagal 3x"; exit 3; }
 
 echo ">> [6/7] payload /opt/debz + app opsional"
 # trailing /. : copy ISI opt-debz, jangan pernah nested (opt/debz/opt-debz)
