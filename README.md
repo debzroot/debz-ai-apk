@@ -11,7 +11,7 @@
 
 **DebzAI** adalah asisten AI mobile opensource khusus Android: APK native ringan yang membawa
 agent AI langsung di HP — bisa ngoding, eksekusi tool, otomatisasi, dan akses sistem —
-tanpa perlu VPS atau API key mahal.
+langsung dari HP, tanpa perlu VPS.
 
 > Install → buka → langsung chat. Rootfs-mini (~130MB) terbundle di APK, backend
 > (php-fpm + nginx + opencode serve) jalan lokal di HP via proot.
@@ -25,7 +25,8 @@ tanpa perlu VPS atau API key mahal.
   scheduler, backup), browser automation (CDP), kendali layar virtual (CUA).
 - **Akses sistem Android**: via Android Bridge (root) — `pm`, `dumpsys`, `settings`,
   `input tap`, dsb. — plus WebView, terminal, dan foreground service agar backend tetap hidup.
-- **Hemat & stabil**: provider opencode-cli tanpa API key (session per-device),
+- **Hemat & stabil**: mode opencode-cli pakai session per-device,
+  mode native butuh API key sendiri,
   routing multi-provider dengan **failover otomatis ala 9Router** (provider chain,
   retry + backoff, semua direct tanpa proxy).
 - **Update gampang**: tiap ada `ROOTFS_EPOCH` baru, app wipe + extract ulang otomatis.
@@ -129,7 +130,7 @@ APK dibuka
 | Provider Settings | Mode Selector |
 |---|---|
 | <img src="docs/screenshots/05-provider-settings.png" width="250" /> | <img src="docs/screenshots/06-mode-selector.png" width="250" /> |
-| Ganti model tanpa API key | native / opencode-cli / chat polos |
+| Ganti model (API key sesuai provider) | native / opencode-cli / chat polos |
 
 ## Build & CI
 
