@@ -52,6 +52,21 @@ public class BootstrapService extends Service {
     }
 
     private void bootInner(int offset, android.content.Context ctx) {
+        // GATE EPOCH — tarball baru (ROOTFS_EPOCH naik) wajib wipe+extract
+        // ulang walau stack masih up. Tanpa ini EPOCH bump tidak pernah
+        // kepasang di install lama (ready==true -> skip terus, /.epoch basi).
+        try {
+            if (RootfsManager.ready(ctx) && !RootfsManager.epochOk(ctx)) {
+                android.util.Log.i("DebzAI", "epoch beda -> wipe + extract ulang");
+                try { StackSupervisor.stop(ctx, RootfsManager.dir(ctx)); }
+                catch (Exception se) {
+                    android.util.Log.w("DebzAI", "stop sblm wipe gagal: " + se);
+                }
+                RootfsManager.wipe(ctx);
+            }
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "epoch gate gagal, lanjut boot penuh: " + e);
+        }
         // GATE IDEMPOTEN — fix "buka app = menyalakan stack lagi".
         // Kalau stack sudah hidup di port tersimpan: langsung "up", TANPA
         // exec proot, TANPA random port, TANPA start ulang.

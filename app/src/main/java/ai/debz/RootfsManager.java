@@ -78,7 +78,7 @@ public final class RootfsManager {
         return bundledName(ctx) != null;
     }
 
-    private static boolean epochOk(Context ctx) {
+    public static boolean epochOk(Context ctx) {
         try {
             java.util.Scanner s = new java.util.Scanner(new File(dir(ctx), ".epoch"));
             boolean ok = s.hasNextInt() && s.nextInt() == ROOTFS_EPOCH;
