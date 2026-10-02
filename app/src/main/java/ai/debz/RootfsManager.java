@@ -517,6 +517,10 @@ public final class RootfsManager {
             syncNewer(new File(base, "app/notes.db"), new File(dst, "notes.db"));
             syncNewer(new File(base, "app/.ai-config.ini"), new File(dst, ".ai-config.ini"));
             syncNewer(new File(base, "app/.ai-providers.json"), new File(dst, ".ai-providers.json"));
+            // Riwayat chat + session opencode (opencode.db) sama upload user
+            // ikut, karena wipe epoch_benar-benar hapus rootfs lama.
+            syncNewer(new File(base, "app/opencode-bin/.data_home"), new File(dst, "data_home"));
+            syncNewer(new File(base, "app/media"), new File(dst, "media"));
             android.util.Log.i("DebzAI", "backup user ke " + dst.getAbsolutePath());
         } catch (Exception e) {
             android.util.Log.w("DebzAI", "backup user skip: " + e);
@@ -535,6 +539,8 @@ public final class RootfsManager {
             syncNewer(new File(dst, "notes.db"), new File(base, "app/notes.db"));
             syncNewer(new File(dst, ".ai-config.ini"), new File(base, "app/.ai-config.ini"));
             syncNewer(new File(dst, ".ai-providers.json"), new File(base, "app/.ai-providers.json"));
+            syncNewer(new File(dst, "data_home"), new File(base, "app/opencode-bin/.data_home"));
+            syncNewer(new File(dst, "media"), new File(base, "app/media"));
             android.util.Log.i("DebzAI", "restore user dari " + dst.getAbsolutePath());
         } catch (Exception e) {
             android.util.Log.w("DebzAI", "restore user skip: " + e);
