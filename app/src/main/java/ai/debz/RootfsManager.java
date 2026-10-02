@@ -25,7 +25,8 @@ public final class RootfsManager {
     // 17 = AGENTS.md canonical + opencode instructions + notes auto-seed (agent no-search) + browser http-fallback mirror HP.
     // 18 = PROXY-FREE total (proxy-grabber dihapus) + label term 🚚💨💨 Di Proses + AllowAll auto fix.
     // 19 = stream anti-putus sampai Done (grace 90s CLI / 60s card + heartbeat 10s + resume run_id) + pesan 429 "VPN/ganti provider lalu ketik lanjut".
-    private static final int ROOTFS_EPOCH = 19;
+    // 20 = pesan Stream kosong jelas (limit tersembunyi / engine dingin + VPN/ganti provider lalu ketik lanjut) + safety net api.php.
+    private static final int ROOTFS_EPOCH = 20;
 
     public interface Progress {
         void on(String stage, int percent);

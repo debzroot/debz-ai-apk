@@ -816,7 +816,7 @@ if($P && in_array(($P['mode']?? 'chat'),['native','chat','opencode-cli'],true)) 
     if(! isset($doneSent)|| ! $doneSent) {
         if(empty($emittedAnything)) {
             if(function_exists('applog'))applog('API','EMPTY_STREAM safety net triggered',['reason' => 'no content emitted before emitDone']);
-            $fallbackMsg = "\n\n⚠️ **Stream kosong**: provider tidak mengirim konten apapun. Coba ulangi atau ganti model.\n";
+            $fallbackMsg = "\n\n⚠️ **Stream kosong**: provider tidak mengirim konten apapun. Bisa jadi limit tersembunyi. Coba pake VPN dulu, atau coba ganti ke provider gratis / berbayar lainnya lalu ketik lanjut.\n";
             emit(['choices' =>[['delta' =>['content' => $fallbackMsg]]]]);
         }
     }emitDone();

@@ -1626,7 +1626,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
                 if(function_exists('termEmit'))termEmit('limit','Kena limit 429 (stderr CLI) — coba VPN dulu / ganti provider lalu ketik lanjut.');
             } else {
-                $msg = "\n\n⚠️ **Stream kosong** — opencode CLI tidak menghasilkan teks (".$exitTxt.").\n";
+                $msg = "\n\n⚠️ **Stream kosong** — opencode CLI tidak menghasilkan teks (".$exitTxt."). Bisa jadi limit tersembunyi / engine dingin. Coba pake VPN dulu, atau coba ganti ke provider gratis / berbayar lainnya lalu ketik lanjut.\n";
                 if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
             }
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => $msg]]]]);
