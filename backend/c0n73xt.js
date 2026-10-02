@@ -2683,7 +2683,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     }
                 }
 
-                if (!fullContent && !doneReceived) fullContent = "⚠️ Maaf, Gak ada balesan..";
+                if (!fullContent && !doneReceived) fullContent = "⚠️ Maaf, Gak ada balesan.. (stream putus sebelum DONE — agent mungkin masih jalan, sesi aman; tekan Regen / kirim ulang untuk lanjut di chat yang sama)";
 
                 if (!fullContent && doneReceived) {
                     fullContent = "⚠️ Provider balikin jawaban kosong (kemungkinan model cuma ngerjain reasoning tanpa output).\n\nCoba kirim ulang pesan lu — kalau masih kayak gini, ganti model di ⚙️ Settings.";
@@ -2753,7 +2753,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     if (mySessionId === activeSessionId) {
                         var errBase = fullContent || SR.text();
                         var isNetAbort = /abort|bodyStream|network|fetch|load failed/i.test(errDetail || '');
-                        var friendlyErr = isNetAbort ? 'Koneksi kepotong padahal agent masih jalan — kirim ulang / tekan Regen untuk lanjut.' : errDetail;
+                        var friendlyErr = isNetAbort ? 'Koneksi kepotong padahal agent masih jalan (backend tahan 90 dtk grace, sesi opencode aman di chat yang sama) — kirim ulang / tekan Regen untuk lanjut.' : errDetail;
                         var errText = errBase ? errBase + '\n\n⚠️ ' + friendlyErr : '⚠️ Error: ' + friendlyErr;
                         SR.flush(errText, rdItems || [], placeholder.querySelector('.msg-text'));
                         SR.stop();

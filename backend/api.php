@@ -832,10 +832,12 @@ if(function_exists('apache_setenv')) {
 set_time_limit(0);
 function emit($obj) {
     echo 'data: '.json_encode($obj,JSON_UNESCAPED_UNICODE)."\n\n";
+    if(function_exists('ob_flush'))@ob_flush();
     flush();
 }
 function emitDone() {
     echo "data: [DONE]\n\n";
+    if(function_exists('ob_flush'))@ob_flush();
     flush();
 }
 function trunc($s,$n) {

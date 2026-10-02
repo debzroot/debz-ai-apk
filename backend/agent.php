@@ -432,6 +432,8 @@ function native_phase_emit(string $phase,string $msg): void {
     if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => $phase.' '.$msg]);
 }
 function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $userText,bool $toolsOn = true,array $providerChain = [],? array $PROVIDERS = null,bool $allowSessionIn = false): void {
+    @ set_time_limit(0);
+    @ ignore_user_abort(true);
     $baseUrl = (string)($P['base_url']?? '');
     $apiKey = (string)($P['api_key']?? '');
     $model = (string)($P['model']?? '');
@@ -737,6 +739,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
 }
 function native_agent_run_opencode_card(array $P,string $model,string $userText,string $openSession,string $mapFile,string $threadId,array $serveCfg,string $bin,bool $allowSessionIn = false,array $attachFiles = [],array $messagesIn = []): void {
     @ set_time_limit(0);
+    @ ignore_user_abort(true);
     global $emittedAnything,$doneSent;
     if(function_exists('applog'))applog('OPENCODE_CARD','start',['model' => $model,'thread' => substr($threadId,0,40),'user_len' => strlen($userText),'files' => count($attachFiles)]);
     if(! debz_card_deps_ok()) {
@@ -832,8 +835,10 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
         if(isset($postBodyTmp)&& is_file($postBodyTmp))@ unlink($postBodyTmp);
         if(function_exists('emitDone'))emitDone();
         return;
-    }$t0 = time();
+    }
+    $t0 = time();
     $lastAct = time();
+    $cardGoneAt = 0;
     $toolCardN = 0;
     $buf = '';
     $msgRoles = [];
@@ -960,9 +965,17 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
                 break;
             }
         }
+        // GRACE 60s: blip WebView jangan langsung bunuh kartu approval.
         if(function_exists('connection_aborted')&& @ connection_aborted()=== 1) {
-            $cardDone = true;
-            break;
+            if($cardGoneAt === 0) {
+                $cardGoneAt = time();
+                if(function_exists('applog'))applog('OPENCODE_CARD','client_gone_grace',['grace' => 60]);
+            } elseif((time()- $cardGoneAt)>= 60) {
+                $cardDone = true;
+                break;
+            }
+        } else {
+            $cardGoneAt = 0;
         }
     }
     if(is_resource($ssePipes[1])) {
@@ -1172,6 +1185,7 @@ function oc_auto_handoff_summary(array $P,array $messagesIn): string {
 }
 function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens,string $userText,string $threadId = '',bool $toolsOn = true,bool $allowSessionIn = false,array $attachFiles = []): void {
     @ set_time_limit(0);
+    @ ignore_user_abort(true);
     global $emittedAnything,$doneSent;
     if(function_exists('applog'))applog('OPENCODE_CLI','start',['model' => (string)($P['model']?? ''),'thread' => substr($threadId,0,40),'user_len' => strlen($userText),'files' => count($attachFiles)]);
     $bin = '';
@@ -1336,6 +1350,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         $hangNotified = false;
         $loopDetected = false;
         $clientGone = false;
+        $clientGoneAt = 0;
         $stepCount = 0;
         $lastTextChunk = '';
         $textRepeat = 0;
@@ -1469,6 +1484,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                     }$touchProgress();
                     break;
                     case 'error': $em = isset($ev['error'])&& is_array($ev['error'])?($ev['error']['message']?? 'opencode error'):((string)($ev['error']?? $part['error']?? 'opencode error'));
+                    $emIsLimit = preg_match('/\b(429|rate limit|rate-limit|ratelimit|quota|too many requests)\b/i',$em)=== 1;
                     $touchProgress();
                     // ERROR di sesi panjang (>=12 turn): sesi CLI kemungkinan korup/
                     // overload. Putus map biar request BERIKUTNYA fresh + kasih tau user
@@ -1478,18 +1494,35 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                         oc_emit_handoff($threadId,$ocTurns,'error sesi panjang, map di-reset — kirim ulang pesanmu','handoff_rotated');
                         if(function_exists('applog'))applog('OPENCODE_CLI','error_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'err' => substr($em,0,120)]);
                     }
-                    if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode error:** ".$em."\n"]]]]);
+                    if($emIsLimit) {
+                        if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Kena Limit 429 nih, Coba pake VPN, atau coba pake provider gratis/berbayar lainnya dulu**\n\n`".trunc((string)$em,300)."`\n"]]]]);
+                        if(function_exists('termEmit'))termEmit('limit','Kena Limit 429 — sarankan VPN/ganti provider.');
+                    } else {
+                        if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode error:** ".$em."\n"]]]]);
+                    }
                     if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'error','line' => '❌ opencode: '.trunc((string)$em,160)]);
                     $sawContent = true;
                     break;
                     default: break;
                 }
             }
-            if(! $clientGone && function_exists('connection_aborted')&& @ connection_aborted()=== 1) {
-                $clientGone = true;
-                @ proc_terminate($proc,9);
-                if(function_exists('applog'))applog('OPENCODE_CLI','client_gone',['terminate' => true]);
-                break;
+            // GRACE 90s: WebView/HP sering jeda sesaat (throttle/blip) hingga
+            // connection_aborted()=1 padahal user masih nunggu. Jangan bunuh
+            // opencode langsung — beri tenggang, tetap heartbeat, baru kill
+            // bila masih putus sehabis grace. Sesi serve tetap persisten.
+            if(function_exists('connection_aborted')&& @ connection_aborted()=== 1) {
+                if($clientGoneAt === 0) {
+                    $clientGoneAt = time();
+                    if(function_exists('termEmit'))termEmit('warn','📡 Koneksi frontend kedip — agent tetap jalan 90 dtk (grace)...');
+                    if(function_exists('applog'))applog('OPENCODE_CLI','client_gone_grace',['grace' => 90]);
+                } elseif((time()- $clientGoneAt)>= 90) {
+                    $clientGone = true;
+                    @ proc_terminate($proc,9);
+                    if(function_exists('applog'))applog('OPENCODE_CLI','client_gone',['terminate' => true,'after_grace' => 90]);
+                    break;
+                }
+            } else {
+                $clientGoneAt = 0;
             }
             if(! $status['running'])break;
             if((time()- $lastBeat)>= 10) {
@@ -1587,10 +1620,17 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 else usleep(2000000);
                 continue;
             }
-            $msg = "\n\n⚠️ **Stream kosong** — opencode CLI tidak menghasilkan teks (".$exitTxt.").\n";
-            if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
+            $errIsLimit = preg_match('/\b(429|rate limit|rate-limit|ratelimit|quota|too many requests)\b/i',$err)=== 1;
+            if($errIsLimit) {
+                $msg = "\n\n⚠️ **Kena Limit 429 nih, Coba pake VPN, atau coba pake provider gratis/berbayar lainnya dulu**\n";
+                if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
+                if(function_exists('termEmit'))termEmit('limit','Kena Limit 429 (stderr CLI) — sarankan VPN/ganti provider.');
+            } else {
+                $msg = "\n\n⚠️ **Stream kosong** — opencode CLI tidak menghasilkan teks (".$exitTxt.").\n";
+                if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
+            }
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => $msg]]]]);
-            if(function_exists('applog'))applog('OPENCODE_CLI','empty/exit',['exit' => $exitCode,'stderr' => substr($err,0,300)]);
+            if(function_exists('applog'))applog('OPENCODE_CLI',$errIsLimit? 'empty/exit-429': 'empty/exit',['exit' => $exitCode,'stderr' => substr($err,0,300)]);
         }
         if(function_exists('emitDone'))emitDone();
         return;
