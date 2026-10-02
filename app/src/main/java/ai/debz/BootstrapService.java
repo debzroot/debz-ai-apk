@@ -61,6 +61,7 @@ public class BootstrapService extends Service {
                     android.util.Log.i("DebzAI", "stack sudah up + sentinel ok, skip boot");
                     DebzConfig.setStatus(ctx, "up");
                     otaCheckAsync(ctx);
+                    backupAsync(ctx);
                     startBridge(ctx);
                     return;
                 }
@@ -133,6 +134,7 @@ public class BootstrapService extends Service {
                 android.util.Log.i("DebzAI", "stack akhir ok=" + ok);
                 DebzConfig.setStatus(ctx, ok ? "up" : "stack-fail");
                 if (ok) otaCheckAsync(ctx);
+                if (ok) backupAsync(ctx);
                 if (ok) startBridge(ctx);
             } else {
                 DebzConfig.setStatus(ctx, "no-rootfs");
@@ -160,6 +162,28 @@ public class BootstrapService extends Service {
             }).start();
         } catch (Exception e) {
             android.util.Log.w("DebzAI", "ota thread skip: " + e);
+        }
+    }
+
+    // BACKUP BERKALA: tiap boot sukses, sinkron Workspaces/notes.db/config
+    // ke /sdcard/debz-backup/ (lolos uninstall). Best-effort di thread
+    // sendiri biar tak hambat status "up". Tanpa ini backup cuma jalan
+    // pas wipe epoch = uninstall manual tetap hilang semua.
+    private static void backupAsync(android.content.Context ctx) {
+        try {
+            final android.content.Context appCtx = ctx.getApplicationContext();
+            new Thread(() -> {
+                try {
+                    String p = RootfsManager.backupNow(appCtx);
+                    if (p != null && !p.isEmpty()) {
+                        android.util.Log.i("DebzAI", "backup berkala ok: " + p);
+                    }
+                } catch (Exception e) {
+                    android.util.Log.w("DebzAI", "backup berkala skip: " + e);
+                }
+            }).start();
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "backup thread skip: " + e);
         }
     }
 

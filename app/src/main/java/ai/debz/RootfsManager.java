@@ -478,8 +478,21 @@ public final class RootfsManager {
     // SAFETY NET uninstall/wipe: data user (Workspaces, notes.db, config)
     // hidup di storage app-private yang ikut terhapus saat uninstall.
     // Sebelum wipe, salin best-effort ke /sdcard/debz-backup/ (lolos
-    // uninstall); setelah extract segar, kembalikan file yang hilang.
+    // uninstall); setelah extract segar, kembalikan (backup menang atas
+    // seed segar — seed kosong JANGAN menimpa data user).
     // Tak boleh menggagalkan wipe/extract: semua error ditelan + log.
+    // Dipakai 3 arah: wipe epoch, wipe korup, dan backup berkala tiap boot.
+    public static String backupNow(Context ctx) {
+        try {
+            backupUserData(ctx);
+            File dst = backupRoot();
+            return dst != null ? dst.getAbsolutePath() : "";
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "backup manual skip: " + e);
+            return "";
+        }
+    }
+
     private static File backupRoot() {
         File a = new File("/sdcard/debz-backup");
         try {
@@ -497,10 +510,10 @@ public final class RootfsManager {
             File dst = backupRoot();
             if (dst == null) return;
             File base = new File(dir(ctx), "opt/debz");
-            copyMissing(new File(base, "Workspaces"), new File(dst, "Workspaces"));
-            copyMissing(new File(base, "app/notes.db"), new File(dst, "notes.db"));
-            copyMissing(new File(base, "app/.ai-config.ini"), new File(dst, ".ai-config.ini"));
-            copyMissing(new File(base, "app/.ai-providers.json"), new File(dst, ".ai-providers.json"));
+            syncNewer(new File(base, "Workspaces"), new File(dst, "Workspaces"));
+            syncNewer(new File(base, "app/notes.db"), new File(dst, "notes.db"));
+            syncNewer(new File(base, "app/.ai-config.ini"), new File(dst, ".ai-config.ini"));
+            syncNewer(new File(base, "app/.ai-providers.json"), new File(dst, ".ai-providers.json"));
             android.util.Log.i("DebzAI", "backup user ke " + dst.getAbsolutePath());
         } catch (Exception e) {
             android.util.Log.w("DebzAI", "backup user skip: " + e);
@@ -512,29 +525,40 @@ public final class RootfsManager {
             File dst = backupRoot();
             if (dst == null || !dst.isDirectory()) return;
             File base = new File(dir(ctx), "opt/debz");
-            copyMissing(new File(dst, "Workspaces"), new File(base, "Workspaces"));
-            copyMissing(new File(dst, "notes.db"), new File(base, "app/notes.db"));
-            copyMissing(new File(dst, ".ai-config.ini"), new File(base, "app/.ai-config.ini"));
-            copyMissing(new File(dst, ".ai-providers.json"), new File(base, "app/.ai-providers.json"));
+            // Backup menang atas seed segar: file backup selalu disalin
+            // kalau isi beda (seed baru extract = timestamp baru + isi
+            // kosong, wajib ditimpa data user). Merge, tak hapus file baru.
+            syncNewer(new File(dst, "Workspaces"), new File(base, "Workspaces"));
+            syncNewer(new File(dst, "notes.db"), new File(base, "app/notes.db"));
+            syncNewer(new File(dst, ".ai-config.ini"), new File(base, "app/.ai-config.ini"));
+            syncNewer(new File(dst, ".ai-providers.json"), new File(base, "app/.ai-providers.json"));
             android.util.Log.i("DebzAI", "restore user dari " + dst.getAbsolutePath());
         } catch (Exception e) {
             android.util.Log.w("DebzAI", "restore user skip: " + e);
         }
     }
 
-    // Salin src -> dst hanya untuk file/dir yang belum ada di dst
-    // (merge, tak menimpa seed segar). Symlink dilewat.
-    private static void copyMissing(File src, File dst) {
+    // Salin src -> dst kalau isi beda (size/timestamp), merge rekursif buat
+    // dir, symlink dilewat. Dua arah: backup (live menang) + restore
+    // (backup menang atas seed segar). Cek size dulu biar seed kosong 1KB
+    // vs notes.db user 16KB pasti ketimpa — bug lama copyMissing() malah
+    // skip karena dst sudah ada.
+    private static void syncNewer(File src, File dst) {
         try {
             if (src == null || !src.exists()) return;
             if (java.nio.file.Files.isSymbolicLink(src.toPath())) return;
             if (src.isDirectory()) {
                 if (!dst.exists() && !dst.mkdirs() && !dst.isDirectory()) return;
                 File[] kids = src.listFiles();
-                if (kids != null) for (File k : kids) copyMissing(k, new File(dst, k.getName()));
+                if (kids != null) for (File k : kids) syncNewer(k, new File(dst, k.getName()));
                 return;
             }
-            if (dst.exists()) return;
+            if (dst.exists() && dst.isFile()
+                && dst.length() == src.length()
+                && dst.lastModified() == src.lastModified()) return;
+            // dst dir nyasar di path file (sisa korup) = gusur dulu.
+            if (dst.isDirectory()
+                && !java.nio.file.Files.isSymbolicLink(dst.toPath())) deleteRec(dst);
             File parent = dst.getParentFile();
             if (parent != null) parent.mkdirs();
             try (java.io.InputStream in = new java.io.FileInputStream(src);
@@ -543,10 +567,14 @@ public final class RootfsManager {
                 int n;
                 while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             }
+            try { dst.setLastModified(src.lastModified()); } catch (Exception ignored) {}
         } catch (Exception ignored) {}
     }
 
     public static void wipe(Context ctx) {
+        // Semua jalur wipe WAJIB backup dulu: epoch, korup, selfHeal.
+        // Best-effort, tak boleh gagalkan wipe.
+        try { backupUserData(ctx); } catch (Exception ignored) {}
         deleteRec(dir(ctx));
     }
 

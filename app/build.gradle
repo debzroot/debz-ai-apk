@@ -3,8 +3,9 @@ plugins {
 }
 
 // Signing key: prioritas secret CI (DEBZ_KEYSTORE path + password + alias).
-// Tanpa secret -> keystore fallback yang di-cache antar run CI (lihat
-// workflow "Siapkan signing key") + password/alias default di bawah.
+// Tanpa secret -> keystore permanen dari Release signing-key-v1 (workflow
+// "Siapkan signing key permanen": cache lama di-anchor sekali, lalu semua
+// build reuse file yang sama selamanya) + password/alias default di bawah.
 // JANGAN fallback ke debug key runner: debug key ganti tiap build ->
 // INSTALL_FAILED_UPDATE_INCOMPATIBLE -> user dipaksa uninstall (= data
 // workspace hilang). Tanda tangan harus stabil antar build.

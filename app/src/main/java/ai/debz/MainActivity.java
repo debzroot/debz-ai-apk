@@ -332,6 +332,19 @@ public class MainActivity extends Activity {
                 + ",\"pct\":" + OtaManager.progressPct
                 + ",\"error\":\"" + OtaManager.lastError.replace("\"", "") + "\"}";
         }
+
+        // Dipanggil tombol "Backup" di WebUI: sinkron Workspaces/notes.db
+        // ke /sdcard/debz-backup/ sekarang juga (lolos uninstall).
+        // Return path backup / "" kalau gagal (lihat logcat).
+        @JavascriptInterface
+        public String backupNow() {
+            try {
+                String p = RootfsManager.backupNow(MainActivity.this);
+                return p != null ? p : "";
+            } catch (Exception e) {
+                return "";
+            }
+        }
     }
 
     private void loadBackend() {

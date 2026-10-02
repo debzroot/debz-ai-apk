@@ -145,25 +145,50 @@ jobs:
           path: ${{ runner.temp }}/keys/fallback.jks
           key: debz-fallback-keystore-v1
 
-      - name: Siapkan signing key (secret dulu, fallback cache, jangan debug)
+      - name: Siapkan signing key permanen (sekali, reuse selamanya)
         env:
           DEBZ_KEYSTORE: ${{ secrets.DEBZ_KEYSTORE_B64 }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/keys"
+          KEYTAG="signing-key-v1"
           if [ -n "$DEBZ_KEYSTORE" ]; then
             printf '%s' "$DEBZ_KEYSTORE" | base64 -d > "$RUNNER_TEMP/keys/debz.jks"
             echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/debz.jks" >> "$GITHUB_ENV"
-            echo "key dari secret DEBZ_KEYSTORE_B64"
+            echo "key dari secret DEBZ_KEYSTORE_B64 (override pribadi)"
           elif [ -f "$RUNNER_TEMP/keys/fallback.jks" ]; then
             echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/fallback.jks" >> "$GITHUB_ENV"
-            echo "key fallback dari cache (stabil)"
+            echo "key cache lama (kontinuitas, tanpa uninstall)"
+            # Anchor ke release permanen: cache Actions bisa evict 7 hari,
+            # release tidak. Sekali ter-anchor, build selamanya stabil walau
+            # cache hilang. User + dev pakai tanda tangan yang sama.
+            if ! gh release view "$KEYTAG" >/dev/null 2>&1; then
+              gh release create "$KEYTAG" \
+                --title "Signing key stabil (JANGAN HAPUS)" \
+                --notes "Keystore sideload permanen ai.debz. JANGAN HAPUS — hapus = semua user wajib uninstall sekali." || true
+            fi
+            gh release upload "$KEYTAG" --clobber \
+              "$RUNNER_TEMP/keys/fallback.jks#debz-release.jks" || true
+          elif gh release view "$KEYTAG" >/dev/null 2>&1; then
+            mkdir -p /tmp/keydl
+            gh release download "$KEYTAG" -p 'debz-release.jks' \
+              -D /tmp/keydl --clobber
+            cp /tmp/keydl/debz-release.jks "$RUNNER_TEMP/keys/debz.jks"
+            echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/debz.jks" >> "$GITHUB_ENV"
+            echo "key permanen dari release $KEYTAG (stabil, tanpa uninstall)"
           else
-            keytool -genkeypair -keystore "$RUNNER_TEMP/keys/fallback.jks" \
+            keytool -genkeypair -keystore "$RUNNER_TEMP/keys/debz.jks" \
               -alias debz -keyalg RSA -keysize 2048 -validity 9125 \
               -storepass debz-fallback-2026 -keypass debz-fallback-2026 \
               -dname "CN=DebzAI sideload, OU=dev, O=debz, L=id, ST=id, C=ID"
-            echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/fallback.jks" >> "$GITHUB_ENV"
-            echo "::warning::Secret DEBZ_KEYSTORE_B64 kosong — keystore fallback baru dibuat & di-cache. Selama cache hidup, update tetap tanpa uninstall."
+            cp "$RUNNER_TEMP/keys/debz.jks" "$RUNNER_TEMP/keys/fallback.jks"
+            echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/debz.jks" >> "$GITHUB_ENV"
+            gh release create "$KEYTAG" \
+              --title "Signing key stabil (JANGAN HAPUS)" \
+              --notes "Keystore sideload permanen ai.debz. JANGAN HAPUS — hapus = semua user wajib uninstall sekali." || true
+            gh release upload "$KEYTAG" --clobber \
+              "$RUNNER_TEMP/keys/debz.jks#debz-release.jks" || true
+            echo "::notice::Keystore permanen baru dibuat & dianchor ke release signing-key-v1. Mulai sekarang semua build tanda tangan sama = update tinggal tap, tanpa uninstall."
           fi
 
       - uses: gradle/gradle-build-action@v3
