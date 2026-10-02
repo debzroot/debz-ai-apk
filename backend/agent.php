@@ -748,14 +748,14 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
         return;
     }
     $ocTurns = oc_thread_bump($threadId,$openSession);
-    if($ocTurns === 16)oc_emit_handoff($threadId,$ocTurns,'mulai penuh');
-    elseif($ocTurns === 24)oc_emit_handoff($threadId,$ocTurns,'berat, rawan socket putus');
-    elseif($ocTurns > 24 && ($ocTurns% 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
+    if($ocTurns === 12)oc_emit_handoff($threadId,$ocTurns,'mulai penuh, auto-compact siap');
+    elseif($ocTurns === 20)oc_emit_handoff($threadId,$ocTurns,'berat, rawan socket putus');
+    elseif($ocTurns > 20 && ($ocTurns % 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
     // AUTO-ROTATE card: serve session berat di-fresh-kan. Konteks kartu cuma
     // hidup di serve, jadi summary WAJIB ditempel ke pesan pertama.
-    // Trigger: >=20 turn ATAU turn sebelumnya >=250k tokens. Thread UI tetap sama.
+    // Trigger: >=16 turn ATAU turn sebelumnya >=200k tokens. Thread UI tetap sama.
     $tokWhy = ($openSession !== '')? oc_need_rotate_by_tokens($threadId): '';
-    if(($ocTurns >= 20 || $tokWhy !== '') && $openSession !== '') {
+    if(($ocTurns >= 16 || $tokWhy !== '') && $openSession !== '') {
         $resumePack = oc_auto_handoff_summary($P,$messagesIn);
         if($mapFile !== '')@ unlink($mapFile);
         $openSession = '';
@@ -1126,6 +1126,10 @@ function oc_thread_bump(string $threadId,string $openSession): int {
     if(($m['sid']?? '')!== $openSession && $openSession !== '') {
         $m['turns'] = 0;
         $m['sid'] = $openSession;
+    } elseif($openSession === '' && (($m['turns']?? 0) >= 16)) {
+        // fresh sehabis auto-rotate: reset counter biar gak rotate tiap pesan
+        $m['turns'] = 0;
+        $m['sid'] = '';
     }
     $m['turns'] = ((int)($m['turns']?? 0))+ 1;
     $m['updated'] = date('c');
@@ -1133,9 +1137,9 @@ function oc_thread_bump(string $threadId,string $openSession): int {
     @ file_put_contents($f,json_encode($m),LOCK_EX);
     return (int)$m['turns'];
 }
-// AUTO-ROTATE berbasis tokens: tiap turn yang >=250k total / >=200k single-step
+// AUTO-ROTATE berbasis tokens: tiap turn yang >=200k total / >=150k single-step
 // nyatet ke meta, turn BERIKUTNYA auto fresh-serve + summary. Halaman chat (threadId)
-// tetap sama — konteks nyambung via ringkasan 6 pesan terakhir.
+// tetap sama — konteks nyambung via ringkasan 4 pesan terakhir (compact, anti-jebol).
 function oc_thread_note_usage(string $threadId,int $stepInMax,int $usageTotal): void {
     if($threadId === '')return;
     $f = oc_thread_meta_file($threadId);
@@ -1154,8 +1158,8 @@ function oc_thread_last_tokens(string $threadId): array {
 }
 function oc_need_rotate_by_tokens(string $threadId): string {
     [$si,$tt] = oc_thread_last_tokens($threadId);
-    if($si >= 200000)return 'single-step ≈'.number_format($si).' tokens';
-    if($tt >= 250000)return 'total ≈'.number_format($tt).' tokens';
+    if($si >= 150000)return 'single-step ≈'.number_format($si).' tokens';
+    if($tt >= 200000)return 'total ≈'.number_format($tt).' tokens';
     return '';
 }
 function oc_resume_cmd(string $threadId,int $turns): string {
@@ -1170,15 +1174,15 @@ function oc_emit_handoff(string $threadId,int $turns,string $reason,string $type
 function oc_auto_handoff_summary(array $P,array $messagesIn): string {
     // Bawa konteks terakhir sebagai teks (tanpa LLM tambahan): endpoint HTTP
     // zen geo-block dari HP (403), jadi ringkasan LLM tak bisa diandalkan.
-    // Rotasi tetap nyambung via 6 pesan terakhir + instruksi lanjut.
-    $take = array_slice($messagesIn,-6);
+    // Rotasi tetap nyambung via 4 pesan terakhir @500 chars (compact, anti-jebol).
+    $take = array_slice($messagesIn,-4);
     $lines = [];
     foreach($take as $mH) {
         if(! is_array($mH))continue;
         $rH = ($mH['role']?? '')=== 'user'? 'LU': 'DEBZ';
         $cH = trim(strip_tags((string)($mH['content']?? '')));
         if($cH === '')continue;
-        $lines[]= $rH.': '.mb_substr(preg_replace('/\s+/',' ',$cH),0,800);
+        $lines[]= $rH.': '.mb_substr(preg_replace('/\s+/',' ',$cH),0,500);
     }
     if(! $lines)return '';
     return "Konteks sesi sebelumnya (sesi CLI di-fresh-kan, lanjutkan tanpa ngulang):\n".implode("\n",$lines)."\nBaca git status + git diff --stat dulu bila relevan, terus kerjain sisa TODO.";
@@ -1204,15 +1208,15 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking']);
     if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => '🚀 opencode-cli ('.$bin.') · model '.$model.($openSession !== ''? ' · lanjut session '.substr($openSession,0,12).'…': ' · session baru').($toolsOn? ' · ⚡ tools auto': ' · tools off').(count($attachFiles)? ' · 📎 '.count($attachFiles).' file': '')]);
     $ocTurns = oc_thread_bump($threadId,$openSession);
-    if($ocTurns === 16)oc_emit_handoff($threadId,$ocTurns,'mulai penuh');
-    elseif($ocTurns === 24)oc_emit_handoff($threadId,$ocTurns,'berat, rawan socket putus');
-    elseif($ocTurns > 24 && ($ocTurns% 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
-    // AUTO-ROTATE: sesi CLI berat (>=20 turn ATAU turn lalu >=250k tokens)
+    if($ocTurns === 12)oc_emit_handoff($threadId,$ocTurns,'mulai penuh, auto-compact siap');
+    elseif($ocTurns === 20)oc_emit_handoff($threadId,$ocTurns,'berat, rawan socket putus');
+    elseif($ocTurns > 20 && ($ocTurns % 8)=== 0)oc_emit_handoff($threadId,$ocTurns,'overload');
+    // AUTO-ROTATE: sesi CLI berat (>=16 turn ATAU turn lalu >=200k tokens)
     // di-reset fresh + summary dibawa sebagai konteks. UI tetap sesi yang sama —
     // user tinggal lanjut, anti opencode error sesi panjang. Summary ditempel ke
     // userText (CLI cuma kirim userText, bukan messagesIn) + messagesIn.
     $tokWhyCli = ($openSession !== '')? oc_need_rotate_by_tokens($threadId): '';
-    if(($ocTurns >= 20 || $tokWhyCli !== '') && $openSession !== '') {
+    if(($ocTurns >= 16 || $tokWhyCli !== '') && $openSession !== '') {
         $resumePack = oc_auto_handoff_summary($P,$messagesIn);
         if($mapFile !== '')@ unlink($mapFile);
         $openSession = '';

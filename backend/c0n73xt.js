@@ -2391,14 +2391,21 @@ Secara otomatis, Anda wajib menyesuaikan diri berdasarkan bahasa pemrograman yan
                 formData.append('ka_id', kaStreamId);
                 if (activeSessionId) formData.append('thread_id', activeSessionId);
 
-var limitHistory = messages.slice(0, assistantIndex).slice(-10); 
+var limitHistory = messages.slice(0, assistantIndex).slice(-6); // compact: 6 aja biar payload enteng, anti-jebol 250k
 
 var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
     limitHistory.map(function(m){
-        var row = { role: m.role, content: m.role === 'user' ? stripAttachPreview(m.content) : m.content };
+        var raw = m.role === 'user' ? stripAttachPreview(m.content) : m.content;
+        // potong tiap pesan max 4000 chars biar 6 pesan ~24k chars, bukan 600k tokens
+        if (raw && raw.length > 4000) raw = raw.slice(-4000);
+        var row = { role: m.role, content: raw };
 
         if (m.role === 'assistant' && m.reasoning_details && m.reasoning_details.length) {
-            row.reasoning_details = m.reasoning_details;
+            // reasoning_details gede jangan ikut terkirim semua
+            try {
+                var rdStr = JSON.stringify(m.reasoning_details);
+                if (rdStr.length <= 2000) row.reasoning_details = m.reasoning_details;
+            } catch(e) {}
         }
         return row;
     })
