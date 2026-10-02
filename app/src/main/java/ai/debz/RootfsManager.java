@@ -26,7 +26,8 @@ public final class RootfsManager {
     // 18 = PROXY-FREE total (proxy-grabber dihapus) + label term 🚚💨💨 Di Proses + AllowAll auto fix.
     // 19 = stream anti-putus sampai Done (grace 90s CLI / 60s card + heartbeat 10s + resume run_id) + pesan 429 "VPN/ganti provider lalu ketik lanjut".
     // 20 = pesan Stream kosong jelas (limit tersembunyi / engine dingin + VPN/ganti provider lalu ketik lanjut) + safety net api.php.
-    private static final int ROOTFS_EPOCH = 20;
+    // 21 = auto-compact anti-jebol 689k (rotate 16 turn / 150k single / 200k total, resume 4x500, frontend 6x4000, reasoning>2k drop) + counter-reset fix.
+    private static final int ROOTFS_EPOCH = 21;
 
     public interface Progress {
         void on(String stage, int percent);
