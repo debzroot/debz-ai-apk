@@ -2683,7 +2683,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     }
                 }
 
-                if (!fullContent && !doneReceived) fullContent = "⚠️ Maaf, Gak ada balesan.. (stream putus sebelum DONE — agent mungkin masih jalan, sesi aman; tekan Regen / kirim ulang untuk lanjut di chat yang sama)";
+                if (!fullContent && !doneReceived) fullContent = "⚠️ **Stream berhenti sebelum Done** — agent mungkin masih jalan (backend tahan 90 dtk grace, sesi aman di chat yang sama). Ketik `lanjut` untuk meneruskan, atau tekan Regen.";
 
                 if (!fullContent && doneReceived) {
                     fullContent = "⚠️ Provider balikin jawaban kosong (kemungkinan model cuma ngerjain reasoning tanpa output).\n\nCoba kirim ulang pesan lu — kalau masih kayak gini, ganti model di ⚙️ Settings.";
@@ -2691,7 +2691,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 }
 
                 if (!doneReceived && fullContent && fullContent.indexOf('⚠️') !== 0) {
-                    // footer otomatis DIMATIKAN: fullContent += ...;
+                    if (fullContent.toLowerCase().indexOf('ketik lanjut') === -1) fullContent += '\n\n⚠️ *Stream berhenti sebelum Done — ketik `lanjut` untuk meneruskan di chat yang sama.*';
                 } else if (doneReceived && !fullContent) {
                     fullContent = fullContent || '⚠️ Maaf, Gak ada balesan..';
                 }
@@ -2753,7 +2753,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     if (mySessionId === activeSessionId) {
                         var errBase = fullContent || SR.text();
                         var isNetAbort = /abort|bodyStream|network|fetch|load failed/i.test(errDetail || '');
-                        var friendlyErr = isNetAbort ? 'Koneksi kepotong padahal agent masih jalan (backend tahan 90 dtk grace, sesi opencode aman di chat yang sama) — kirim ulang / tekan Regen untuk lanjut.' : errDetail;
+                        var friendlyErr = isNetAbort ? 'Koneksi kepotong sebelum Done padahal agent masih jalan (backend tahan 90 dtk grace, sesi aman di chat yang sama) — ketik `lanjut` untuk meneruskan.' : errDetail;
                         var errText = errBase ? errBase + '\n\n⚠️ ' + friendlyErr : '⚠️ Error: ' + friendlyErr;
                         SR.flush(errText, rdItems || [], placeholder.querySelector('.msg-text'));
                         SR.stop();

@@ -557,7 +557,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
             }
             if($r['error']!== '') {
                 if(function_exists('emit'))emit(['status' => '⚠️ Error: '.native_trunc($errTxt,90),'progress' => '⚠️ Error: '.native_trunc($errTxt,90),'emoji' => '⚠️']);
-                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n".($isLimit? "😫 **Provider limit/quota:** ": "⚠️ **Provider error:** ").$errTxt]]]]);
+                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n".($isLimit? "⚠️ **Kena limit 429 nih, Coba pake VPN dulu, atau coba ganti ke provider gratis / berbayar lainnya lalu ketik lanjut**\n\n`": "⚠️ **Provider error:** ").$errTxt]]]]);
                 termEmit('error',native_trunc($errTxt,160));
                 if(function_exists('emitDone'))emitDone();
                 return;
@@ -1495,8 +1495,8 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                         if(function_exists('applog'))applog('OPENCODE_CLI','error_rotate',['thread' => substr($threadId,0,12),'turns' => $ocTurns,'err' => substr($em,0,120)]);
                     }
                     if($emIsLimit) {
-                        if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Kena Limit 429 nih, Coba pake VPN, atau coba pake provider gratis/berbayar lainnya dulu**\n\n`".trunc((string)$em,300)."`\n"]]]]);
-                        if(function_exists('termEmit'))termEmit('limit','Kena Limit 429 — sarankan VPN/ganti provider.');
+                        if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Kena limit 429 nih, Coba pake VPN dulu, atau coba ganti ke provider gratis / berbayar lainnya lalu ketik lanjut**\n\n`".trunc((string)$em,300)."`\n"]]]]);
+                        if(function_exists('termEmit'))termEmit('limit','Kena limit 429 — coba VPN dulu / ganti provider lalu ketik lanjut.');
                     } else {
                         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode error:** ".$em."\n"]]]]);
                     }
@@ -1622,9 +1622,9 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             }
             $errIsLimit = preg_match('/\b(429|rate limit|rate-limit|ratelimit|quota|too many requests)\b/i',$err)=== 1;
             if($errIsLimit) {
-                $msg = "\n\n⚠️ **Kena Limit 429 nih, Coba pake VPN, atau coba pake provider gratis/berbayar lainnya dulu**\n";
+                $msg = "\n\n⚠️ **Kena limit 429 nih, Coba pake VPN dulu, atau coba ganti ke provider gratis / berbayar lainnya lalu ketik lanjut**\n";
                 if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
-                if(function_exists('termEmit'))termEmit('limit','Kena Limit 429 (stderr CLI) — sarankan VPN/ganti provider.');
+                if(function_exists('termEmit'))termEmit('limit','Kena limit 429 (stderr CLI) — coba VPN dulu / ganti provider lalu ketik lanjut.');
             } else {
                 $msg = "\n\n⚠️ **Stream kosong** — opencode CLI tidak menghasilkan teks (".$exitTxt.").\n";
                 if($err !== '')$msg .= "\n`".substr($err,0,500)."`\n";
