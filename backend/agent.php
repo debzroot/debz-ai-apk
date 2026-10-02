@@ -1,4 +1,31 @@
 <?php require_once __DIR__."/agent-helpers.php";
+// Reaper anak proses: tanpa ini, `opencode run`/curl yang di-proc_open bisa
+// jadi orphan (client abort) atau zombie (skrip mati sebelum proc_close).
+$GLOBALS['OC_LIVE_PROCS'] = [];
+function oc_proc_watch($p): void {
+    if(! is_resource($p))return;
+    $GLOBALS['OC_LIVE_PROCS'][(int) $p] = $p;
+    register_shutdown_function('oc_proc_reap_live');
+}
+function oc_proc_reap_live(): void {
+    foreach($GLOBALS['OC_LIVE_PROCS'] ?? [] as $q) {
+        if(! is_resource($q))continue;
+        @ proc_terminate($q,9);
+        @ proc_close($q);
+    }
+    $GLOBALS['OC_LIVE_PROCS'] = [];
+}
+function oc_proc_kill($p): void {
+    if(is_resource($p)) {
+        @ proc_terminate($p,9);
+        @ proc_close($p);
+    }
+    unset($GLOBALS['OC_LIVE_PROCS'][(int) $p]);
+}
+function oc_proc_done($p): int {
+    unset($GLOBALS['OC_LIVE_PROCS'][(int) $p]);
+    return (int) @ proc_close($p);
+}
 function debz_ua_ok(string $ua): bool {
     if(stripos($ua,'compat')!== false)return false;
     return (bool)preg_match('#^[A-Za-z0-9._-]+/\d#',$ua);
@@ -807,6 +834,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     $sseDesc = [0 =>['pipe','r'],1 =>['pipe','w'],2 =>['pipe','w']];
     $ssePipes = [];
     $sseProc = @ proc_open($sseCmd,$sseDesc,$ssePipes,null,null);
+    oc_proc_watch($sseProc);
     if(! is_resource($sseProc)) {
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Gagal subscribe SSE** (kartu approval): ".implode(' ',$sseCmd)."\n"]]]]);
         if(function_exists('emitDone'))emitDone();
@@ -833,6 +861,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     $postCmd = ['curl','-s','-X','POST','-u','opencode:'.$pass,'-H','x-opencode-directory: '.$dirEnc,'-H','Content-Type: application/json','-d','@'.$postBodyTmp,'-o',$postTmp,'--max-time','1800',$serverUrl.'/session/'.$sid.'/message'];
     $postPipes = [];
     $postProc = @ proc_open($postCmd,[0 =>['pipe','r'],1 =>['pipe','w'],2 =>['pipe','w']],$postPipes,null,null);
+    oc_proc_watch($postProc);
     if(is_resource($postProc)) {
         fclose($postPipes[0]);
         stream_set_blocking($postPipes[1],false);
@@ -993,13 +1022,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
         @ fclose($ssePipes[2]);
     }
     if(is_resource($sseProc)) {
-        $pgid = null;
-        try {
-            $pgid = proc_get_status($sseProc)['pid']?? null;
-        }catch(Exception $e) {
-            $pgid = null;
-        }@ proc_terminate($sseProc,9);
-        @ proc_close($sseProc);
+        oc_proc_kill($sseProc);
     }
     if(is_resource($postPipes[1])) {
         @ fclose($postPipes[1]);
@@ -1008,8 +1031,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
         @ fclose($postPipes[2]);
     }
     if(is_resource($postProc)) {
-        @ proc_terminate($postProc,9);
-        @ proc_close($postProc);
+        oc_proc_kill($postProc);
     }
     if(is_file($postTmp))@ unlink($postTmp);
     if(isset($postBodyTmp)&& is_file($postBodyTmp))@ unlink($postBodyTmp);
@@ -1203,8 +1225,16 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     $bin = '';
     if(isset($P['extra'])&& is_array($P['extra'])&& ! empty($P['extra']['cli_bin']))$bin = (string)$P['extra']['cli_bin'];
     if($bin === '') {
-        $projBin = __DIR__.'/opencode-bin/opencode';
-        $bin = (is_file($projBin)&& is_executable($projBin))? $projBin: 'opencode';
+        // Rootfs APK naruh CLI di /opt/opencode (opencode-bin/ cuma data_home
+        // + marker .serve.json), dan PATH php-fpm ga memuat /opt/opencode ->
+        // fallback 'opencode' selalu proc_open gagal = "Gagal menjalankan opencode CLI".
+        foreach([__DIR__.'/opencode-bin/opencode','/opt/opencode/opencode'] as $binCand) {
+            if(is_file($binCand)&& is_executable($binCand)) {
+                $bin = $binCand;
+                break;
+            }
+        }
+        if($bin === '')$bin = 'opencode';
     }$model = (string)($P['model']?? '');
     if($model === '' || strpos($model,'/')=== false)$model = 'opencode/'.($model === ''? 'big-pickle': $model);
     $mapFile = $threadId !== ''?(sys_get_temp_dir().'/c0n73xt_oc_sessions_'.md5($threadId).'.json'): '';
@@ -1338,6 +1368,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         $spec = [0 =>['pipe','r'],1 =>['pipe','w'],2 =>['pipe','w']];
         $pipes = [];
         $proc = @ proc_open($cmd,$spec,$pipes,null,$env);
+        oc_proc_watch($proc);
         if(! is_resource($proc)) {
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Gagal menjalankan opencode CLI.**\n\n".implode(' ',array_map('\strval',$cmd))."\n"]]]]);
             if(function_exists('emitDone'))emitDone();
@@ -1569,8 +1600,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 @ fclose($pipes[2]);
             }
             if(is_resource($proc)) {
-                @ proc_terminate($proc,9);
-                @ proc_close($proc);
+                oc_proc_kill($proc);
             }
             if($loopDetected && ! $clientGone) {
                 if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Agent berhenti otomatis — output teks yang sama diulang terus** (loop verbal, langkah ".$stepCount.").\n\nTool yang dipakai berulang tidak dianggap loop — biarin aja jalan.\n"]]]]);
@@ -1598,7 +1628,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         $stderrLeft = (string)@ stream_get_contents($pipes[2]);
         if($stderrLeft !== '')$stderrBuf .= $stderrLeft;
         fclose($pipes[2]);
-        $exitCode = proc_close($proc);
+        $exitCode = oc_proc_done($proc);
         if($mapFile !== '' && $capsSession !== '') {
             @ file_put_contents($mapFile,json_encode(['sessionID' => $capsSession,'updated' => date('c'),'model' => $model]),LOCK_EX);
         }

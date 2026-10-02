@@ -113,6 +113,29 @@ def _fail(msg):
     return {"ok": False, "error": str(msg)}
 
 
+_SYNTAX_PROBE = {
+    ".sh": ["sh", "-n"],
+    ".php": ["php", "-l"],
+    ".py": ["python3", "-c",
+            "import ast,sys;ast.parse(open(sys.argv[1],encoding='utf-8').read(),sys.argv[1])"],
+}
+
+
+def syntax_error(path):
+    """Balik pesan error kalau file ini rusak, else None."""
+    probe = _SYNTAX_PROBE.get(os.path.splitext(path)[1].lower())
+    if not probe:
+        return None
+    argv = probe + [path]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        return f"gate tak bisa jalan ({' '.join(argv[:-1])}): {e}"
+    if r.returncode == 0:
+        return None
+    return f"{' '.join(argv[:-1])}: {(r.stdout + r.stderr).strip()[:400]}"
+
+
 def t_exec(a):
     cmd = str(a.get("command", ""))
     if not cmd.strip():
@@ -163,15 +186,29 @@ def t_write(a):
     for b in _BANNED:
         if b in p:
             return _fail(f"path dilarang: {b}")
+    prev = None
+    if os.path.exists(p):
+        try:
+            with open(p, errors="replace") as f:
+                prev = f.read()
+        except Exception:
+            prev = None
     try:
         parent = os.path.dirname(p)
         if parent:
             os.makedirs(parent, exist_ok=True)
         with open(p, "w") as f:
             f.write(c if isinstance(c, str) else str(c))
-        return _ok(path=p, bytes=len(c))
     except Exception as e:
         return _fail(f"{type(e).__name__}: {e}")
+    bad = syntax_error(p)
+    if bad:
+        if prev is not None:
+            with open(p, "w") as f:
+                f.write(prev)
+            return _fail(f"file dibalik (sintaks rusak): {bad}")
+        return _fail(f"PERHATIAN file baru tersimpan tapi sintaks rusak: {bad}")
+    return _ok(path=p, bytes=len(c))
 
 
 def t_edit(a):
@@ -188,9 +225,14 @@ def t_edit(a):
             return _fail("oldString tidak ketemu")
         if n > 1 and not a.get("replaceAll"):
             return _fail(f"oldString muncul {n}x, tidak unik (pakai replaceAll)")
-        src = src.replace(old, new)
+        out = src.replace(old, new)
         with open(p, "w") as f:
-            f.write(src)
+            f.write(out)
+        bad = syntax_error(p)
+        if bad:
+            with open(p, "w") as f:
+                f.write(src)
+            return _fail(f"file dibalik (sintaks rusak): {bad}")
         return _ok(path=p, replaced=n if a.get("replaceAll") else 1)
     except Exception as e:
         return _fail(f"{type(e).__name__}: {e}")

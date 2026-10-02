@@ -276,6 +276,27 @@ def _is_debz_ai_path(path: str) -> bool:
     except Exception:
         return False
 
+_SYNTAX_PROBE = {
+    ".sh": ["sh", "-n"],
+    ".php": ["php", "-l"],
+    ".py": ["python3", "-c",
+            "import ast,sys;ast.parse(open(sys.argv[1],encoding='utf-8').read(),sys.argv[1])"],
+}
+
+def _syntax_error(path: str) -> str | None:
+    """Balik pesan error kalau file ini rusak, else None."""
+    probe = _SYNTAX_PROBE.get(os.path.splitext(path)[1].lower())
+    if not probe:
+        return None
+    argv = probe + [path]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        return f"gate tak bisa jalan ({' '.join(argv[:-1])}): {e}"
+    if r.returncode == 0:
+        return None
+    return f"{' '.join(argv[:-1])}: {(r.stdout + r.stderr).strip()[:400]}"
+
 def _is_banned_filename(path: str) -> str | None:
     """Cek apakah filename termasuk yang dilarang di ~/debz-ai/. Return alasan jika melanggar."""
     import fnmatch
@@ -306,6 +327,13 @@ def api_fs_write():
         ban = _is_banned_filename(path)
         if ban:
             return jsonify({"error": ban, "hint": "Pindahkan output ke ~/Workspaces/<nama_project>/ sesuai rules AGENTS.md."}), 403
+    prev = None
+    if os.path.exists(path):
+        try:
+            with open(path, errors="replace") as f:
+                prev = f.read()
+        except Exception:
+            prev = None
     try:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -314,6 +342,15 @@ def api_fs_write():
                 f.write(content)
         else:
             p.write_text(content, encoding="utf-8")
+        if not append:
+            bad = _syntax_error(path)
+            if bad:
+                if prev is not None:
+                    p.write_text(prev, encoding="utf-8")
+                    return jsonify({"error": f"file dibalik (sintaks rusak): {bad}",
+                                    "restored": True}), 422
+                return jsonify({"error": f"PERHATIAN file baru tersimpan tapi sintaks rusak: {bad}",
+                                "restored": False}), 422
         return jsonify({"path": path, "bytes_written": len(content), "append": append})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -3012,8 +3012,15 @@ class Agent:
     def _chat_opencode_cli(self, user_msg, ui):
         extra = self.cfg.get("EXTRA") or {}
         bin_p = (extra.get("cli_bin") or "").strip()
+        # APK rootfs: CLI di /opt/opencode, bukan opencode-bin/ (lihat agent.php).
         if not bin_p:
-            bin_p = os.path.join(PROJECT_ROOT, "opencode-bin", "opencode")
+            for cand in (os.path.join(PROJECT_ROOT, "opencode-bin", "opencode"),
+                         "/opt/opencode/opencode"):
+                if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                    bin_p = cand
+                    break
+            else:
+                bin_p = os.path.join(PROJECT_ROOT, "opencode-bin", "opencode")
 
         if not os.path.isfile(bin_p):
             return f"⚠️ opencode binary tidak ditemukan: {bin_p}"

@@ -9,6 +9,7 @@ captures/
 .externalNativeBuild/
 .cxx/
 rootfs/__pycache__/
+backend/__pycache__/
 out/
 .work-rootfs/
 # build-time artifacts dari CI: rootfs 130MB + proot .so, jangan pernah ke-commit

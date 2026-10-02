@@ -55,3 +55,14 @@ Rule: butuh akses HP (buka app, tap, setting sistem) → SELALU via `/api/androi
 ## 6. Skill yang sering dipakai
 - `skill action=search pattern="<kata>"` dulu sebelum baca full. Kategori: `debz-ai`, `autonomous-ai-agents`, `architecture/debz-ai-agent-optimization`, `webui`, `networking`, `android`.
 - Kalau ubah SOP → wajib sinkron 3 tempat (AGENTS.md, notes.db `rules-core-ai`, skills) — lihat `agents-rules-sync-self-improvement/SKILL.md`.
+
+## 7. SYNTAX GATE (WAJIB — Anti-Sabotase File Sendiri)
+- **WAJIB** abis edit `.sh` / `.php` / `.py`, validasi **sebelum** bilang "selesai":
+  - `.sh` → `sh -n <file>` · `.php` → `php -l <file>` · `.py` → `python3 -c "import ast,sys;ast.parse(open(sys.argv[1],encoding='utf-8').read(),sys.argv[1])" <file>` · `.js` → `node --check <file>`
+- **Gagal validasi = ROLLBACK INSTAN** (isi lama yang udah dibaca, atau `/root/.ai-stagging/BACKUP/`). **DILARANG** ninggalin file rusak — `start-stack.sh` rusak = **seluruh stack mati**, `agent.php`/`api.php` rusak = chat mati.
+- Gate otomatis sudah nempel di tool `file_write`/`file_edit` (`backend.py` + `debz_tools_mcp.py`): file `.sh/.php/.py` rusak **otomatis dibalik**. Kalau muncul `file dibalik (sintaks rusak)` → patch-mu salah, perbaiki. Jangan dipaksa, jangan di-backup.
+- **Anti-pola saat nulis `.sh`** (ini yang pernah bikin stack mati total):
+  - **Jangan nulis quote ter-escape** (`\"`, `\\0`, `\\.`) — gejala write/heredoc yang nge-escape 2x, `sh` langsung `Syntax error: "(" unexpected`, dan baru meledak **saat restart**, bukan saat edit.
+  - Heredoc pakai delimiter ter-quote (`<<'EOF'`) kalau isinya nyisipin `$var`/`$(...)`/backtick.
+  - **Patch per blok** (oldString → newString), jangan tulis ulang seluruh file dari ingatan.
+- File yang dipakai proot/startup (`*.conf`, `*.template`, `start-stack.sh`, `watchdog.sh`) wajib **render + tes** sebelum declare OK: `sh -n`, `nginx -t -c <render>`, `php -l`.
