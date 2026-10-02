@@ -13,6 +13,8 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -26,9 +28,14 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final int REQ_STORAGE = 41;
+    private static final int REQ_FILE = 42;
     private static final long POLL_MS = 2000;
 
     private WebView web;
+    // Pending <input type="file"> dari webui. Tanpa onShowFileChooser di
+    // WebChromeClient, WebView cuma diem: tap tombol upload ga nge-trigger
+    // picker sama sekali, jadi userikir tombolnya rusak.
+    private ValueCallback<Uri[]> fileChooser;
     private LinearLayout splash;
     private ProgressBar splashBar;
     private TextView splashStage;
@@ -86,7 +93,30 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new AndroidBridge(), "DebzAndroid");
         // WAJIB: tanpa WebChromeClient, JS confirm()/alert() mati total
         // (return false diam-diam) -> hapus session/clear/compact ga bisa.
-        web.setWebChromeClient(new android.webkit.WebChromeClient() {
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view,
+                                             ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                if (fileChooser != null) fileChooser.onReceiveValue(null);
+                fileChooser = callback;
+                try {
+                    Intent pick = new Intent(params.createIntent());
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    startActivityForResult(
+                        Intent.createChooser(pick, "Pilih gambar"),
+                        REQ_FILE);
+                    return true;
+                } catch (Exception e) {
+                    fileChooser = null;
+                    android.util.Log.w("DebzAI", "file chooser gagal: " + e);
+                    Toast.makeText(MainActivity.this,
+                        "Gak ada app picker file", Toast.LENGTH_SHORT).show();
+                    return false;
+                }
+            }
+
             @Override
             public boolean onJsConfirm(android.webkit.WebView view, String url,
                                        String message, android.webkit.JsResult result) {
@@ -165,6 +195,33 @@ public class MainActivity extends Activity {
         poll.post(poller);
         // Ketuk notif update -> langsung mulai tap-to-update.
         handleUpdateIntent(getIntent());
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode,
+                                    Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_FILE) return;
+        ValueCallback<Uri[]> cb = fileChooser;
+        fileChooser = null;
+        if (cb == null) return;
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            cb.onReceiveValue(null);
+            return;
+        }
+        // Multi-select: user bisa pilih beberapa gambar sekaligus.
+        java.util.ArrayList<Uri> picked = new java.util.ArrayList<>();
+        if (data.getClipData() != null) {
+            android.content.ClipData clip = data.getClipData();
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                Uri u = clip.getItemAt(i).getUri();
+                if (u != null) picked.add(u);
+            }
+        } else if (data.getData() != null) {
+            picked.add(data.getData());
+        }
+        cb.onReceiveValue(picked.isEmpty()
+            ? null : picked.toArray(new Uri[0]));
     }
 
     @Override

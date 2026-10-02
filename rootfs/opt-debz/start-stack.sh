@@ -64,6 +64,12 @@ if [ ! -f "$APP/index.php" ]; then
   echo "<h3>debz-ai stack OK</h3><p>web=$PORT_WEB api=$PORT_API</p>" > "$APP/index.html"
 fi
 
+# media/ butuh write dari user php-fpm (www-data), sementara $APP milik uid
+# app Android. Tanpa 0777 di sini, debz_chat_images_save() gagal mkdir/move
+# -> "gak ada image valid" padahal file-nya valid.
+mkdir -p "$APP/media"
+chmod 0777 "$APP/media" 2>/dev/null || true
+
 # daemon tanpa nyentuh stdin/stdout/stderr parent
 spawn() { _dlog=$1; shift; "$@" >>"$_dlog" 2>&1 </dev/null & }
 

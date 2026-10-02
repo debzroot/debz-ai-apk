@@ -4,6 +4,12 @@ events { worker_connections 64; }
 http {
     include /etc/nginx/mime.types;
     access_log /opt/debz/logs/nginx-access.log;
+    # Default nginx = 1m. Foto HP 2-8MB langsung kena 413 dan media_upload
+    # mati. Naikin ke 64m supaya 5 gambar full-res bisa lewat (PHP upload
+    # cap 20MB/file, jadi 64m masih longgar).
+    client_max_body_size 64m;
+    client_body_timeout 300s;
+    send_timeout 3600s;
     server {
         listen @WEB@;
         root /opt/debz/app;
