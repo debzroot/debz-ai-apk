@@ -1617,6 +1617,48 @@
         kaBeaconTimer = null;
     }
 
+    // ===== ZEN NATIVE SSE (ai.debz) =====
+    // HTTP dibaca di thread Java (ZenStreamClient), JS cuma parse line.
+    // Selamat dari web.onPause/throttle/Doze. Fallback ke fetch bila
+    // native gak ada (browser) atau ada images (multipart file v1).
+    var __zenJobs = {};
+    function zenCanNative(hasFiles) {
+        if (hasFiles) return false;
+        try { return !!(window.DebzAndroid && window.DebzAndroid.zenStart); }
+        catch (e) { return false; }
+    }
+    window.__zenNativeOnEvent = function(key, raw) {
+        var j = __zenJobs[key];
+        if (j && j.onLine) { try { j.onLine(raw); } catch (e) {} }
+    };
+    window.__zenNativeOnDone = function(key, clean) {
+        var j = __zenJobs[key];
+        if (j && j.onDone) { try { j.onDone(!!clean); } catch (e) {} }
+        delete __zenJobs[key];
+    };
+    window.__zenNativeOnError = function(key, msg) {
+        var j = __zenJobs[key];
+        if (j && j.onError) { try { j.onError(msg || 'native error'); } catch (e) {} }
+        delete __zenJobs[key];
+    };
+    function zenNativeStart(key, payloadObj) {
+        var p = {
+            messages: JSON.stringify(payloadObj.messages || []),
+            prompt: payloadObj.prompt || '',
+            max_tokens: String(payloadObj.max_tokens || 8192),
+            tools: payloadObj.tools || '1',
+            approval_session: payloadObj.approval_session || '0',
+            ka_id: payloadObj.ka_id || '',
+            thread_id: payloadObj.thread_id || ''
+        };
+        if (payloadObj.provider_id) p.provider_id = payloadObj.provider_id;
+        if (payloadObj.stop) p.stop = JSON.stringify(payloadObj.stop);
+        return window.DebzAndroid.zenStart(key, API_URL, JSON.stringify(p));
+    }
+    function zenNativeCancel(key) {
+        try { if (window.DebzAndroid && window.DebzAndroid.zenCancel) window.DebzAndroid.zenCancel(key); } catch (e) {}
+    };
+
     var tokenCount = 0;
 
     function updateProgressFromGlobal() {
@@ -2424,13 +2466,79 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 filesToSend.forEach(function(file) { formData.append('images[]', file); });
 
                 termLog('info', '▶ kirim pesan ke agent');
-                var response = await fetch(API_URL, {
-                    method: 'POST',
-                    signal: abortController.signal,
-                    body: formData,
-                    cache: 'no-store',
-                    headers: { 'Accept': 'text/event-stream' }
-                });
+                var useNative = zenCanNative(filesToSend.length);
+                var response = null;
+                if (useNative) {
+                    // Native transport: Java baca SSE, JS baca antrean byte.
+                    // Bentuk response disamain kayak fetch biar parser bawah 100% reuse.
+                    var nKey = 'zen' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+                    var nQ = [];
+                    var nEnded = false;
+                    var nClean = false;
+                    var nErr = '';
+                    var nWaiter = null;
+                    var te = new TextEncoder();
+                    __zenJobs[nKey] = {
+                        onLine: function(raw) { nQ.push(te.encode(raw + '\n')); if (nWaiter) { var w = nWaiter; nWaiter = null; w(); } },
+                        onDone: function(clean) { nEnded = true; nClean = !!clean; if (nWaiter) { var w2 = nWaiter; nWaiter = null; w2(); } },
+                        onError: function(m) { nEnded = true; nErr = m || 'native error'; if (nWaiter) { var w3 = nWaiter; nWaiter = null; w3(); } }
+                    };
+                    myStream.nativeKey = nKey;
+                    var started = '';
+                    try {
+                        started = zenNativeStart(nKey, {
+                            messages: historyPayload, prompt: text, max_tokens: 8192,
+                            tools: toolsOn ? '1' : '0', approval_session: approvalSession ? '1' : '0',
+                            provider_id: activeProviderId || '', ka_id: kaStreamId,
+                            thread_id: activeSessionId || '',
+                            stop: ["</| DSML | invoke>", "EOF", "</| DSML | tool_calls>"]
+                        });
+                    } catch (e) { started = ''; }
+                    if (!started) { delete __zenJobs[nKey]; useNative = false; }
+                    else {
+                        if (!window.__zenAbortHooked) {
+                            window.__zenAbortHooked = true;
+                            try {
+                                var _ab = AbortController.prototype.abort;
+                                AbortController.prototype.abort = function() {
+                                    try {
+                                        Object.keys(sessionStreams).forEach(function(sid) {
+                                            var st = sessionStreams[sid];
+                                            if (st && st.abort === this && st.nativeKey) zenNativeCancel(st.nativeKey);
+                                        }.bind(this));
+                                    } catch (e) {}
+                                    return _ab.apply(this, arguments);
+                                };
+                            } catch (e) {}
+                        }
+                        response = { ok: true, status: 200, statusText: 'OK', __nativeKey: nKey,
+                            body: { getReader: function() {
+                                return { read: function() {
+                                    return new Promise(function(res) {
+                                        function pump() {
+                                            if (nQ.length) { res({ done: false, value: nQ.shift() }); return; }
+                                            if (nEnded) {
+                                                if (nErr && !nClean) res({ done: true, value: undefined });
+                                                else res({ done: true, value: undefined });
+                                                return;
+                                            }
+                                            nWaiter = pump;
+                                        }
+                                        pump();
+                                    });
+                                } };
+                            } } };
+                    }
+                }
+                if (!useNative) {
+                    response = await fetch(API_URL, {
+                        method: 'POST',
+                        signal: abortController.signal,
+                        body: formData,
+                        cache: 'no-store',
+                        headers: { 'Accept': 'text/event-stream' }
+                    });
+                }
 
                 if (!response.ok) {
                     if (window.__clientLog) window.__clientLog('error', 'chat fetch HTTP ' + response.status, { statusText: response.statusText });

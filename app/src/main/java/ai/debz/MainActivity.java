@@ -449,6 +449,37 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        // Zen native SSE: HTTP dibaca di thread Java (ZenStreamClient),
+        // JS cuma nerima line via __zenNativeOnEvent/Done/Error.
+        @JavascriptInterface
+        public String zenStart(String streamKey, String url, String payloadJson) {
+            try {
+                keepAwake(true);
+                return ZenStreamClient.start(
+                    MainActivity.this, web, streamKey, url, payloadJson);
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        @JavascriptInterface
+        public void zenCancel(String streamKey) {
+            try {
+                ZenStreamClient.cancel(streamKey != null ? streamKey : "");
+                if (!isFinishing()) keepAwake(false);
+            } catch (Exception ignored) {}
+        }
+
+        @JavascriptInterface
+        public String zenReplay(String streamKey) {
+            try {
+                return ZenStreamClient.replay(
+                    MainActivity.this, streamKey != null ? streamKey : "");
+            } catch (Exception e) {
+                return "";
+            }
+        }
     }
     private android.os.PowerManager.WakeLock chatWl = null;
     private android.net.wifi.WifiManager.WifiLock chatWifi = null;
