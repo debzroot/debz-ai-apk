@@ -1184,6 +1184,11 @@ function processUpstreamBlock($block) {
         if($d !== '') {
             emit(['choices' =>[['delta' =>['content' => $d]]]]);
         }
+    }elseif(substr($type,-6) === '.delta' && isset($obj['delta']) && is_string($obj['delta']) && $obj['delta'] !== '') {
+        // Event delta generik (reasoning_summary_text.delta, function_call_arguments.delta, dll): teruskan sebagai konten agar stream tidak terlihat mati.
+        emit(['choices' =>[['delta' =>['content' => $obj['delta']]]]]);
+    }elseif(substr($type,-5) === '.done') {
+        // Event .done generik (output_text.done, reasoning_summary_text.done, dll): bukan akhir stream — abaikan, tunggu response.completed.
     }elseif($type === 'response.completed') {
         $usage = isset($obj['response']['usage'])&& is_array($obj['response']['usage'])? $obj['response']['usage']:[];
         emit(['type' => 'usage','input_tokens' => isset($usage['input_tokens'])? $usage['input_tokens']: 0,'output_tokens' => isset($usage['output_tokens'])? $usage['output_tokens']: 0,'total_tokens' => isset($usage['total_tokens'])? $usage['total_tokens']: 0]);

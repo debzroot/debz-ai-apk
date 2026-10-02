@@ -184,7 +184,7 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
         return['content' => '','reasoning' => '','reasoningDetails' =>[],'toolCalls' =>[],'usage' => null,'finish_reason' => '','error' => 'PHP curl ext tidak aktif di HP (rootfs lama) — update APK atau pakai mode opencode-cli','http_code' => 0];
     }
     $url = rtrim($baseUrl,'/').'/chat/completions';
-    $payload = ['model' => $model,'messages' => $messages,'stream' => true,'stream_options' =>['include_usage' => true],'stop' =>["</| DSML | invoke>","EOF","</| DSML | tool_calls>","[DONE]"]];
+    $payload = ['model' => $model,'messages' => $messages,'stream' => true,'stream_options' =>['include_usage' => true],'stop' =>["</| DSML | invoke>","EOF","</| DSML | tool_calls>"]];
     if(! empty($tools))$payload['tools']= $tools;
     if($maxTokens > 0)$payload['max_tokens']= min($maxTokens,8192);
     $isOR = stripos($baseUrl,'openrouter.ai')!== false;

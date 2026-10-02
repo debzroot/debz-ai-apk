@@ -2563,8 +2563,9 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                         var line = lines[i].trim();
                         if (!line) continue;
                         if (line === ': ka') continue;
-                        if (line === '[DONE]') { doneReceived = true; continue; }
                         if (line.startsWith('data:')) line = line.substring(5).trim();
+                        if (!line) continue;
+                        if (line === '[DONE]' || line === '"[DONE]"' || line === "'[DONE]'") { doneReceived = true; continue; }
 
                         try {
                             var parsed = JSON.parse(line);
@@ -2674,6 +2675,23 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                         } catch(e) {}
                     }
                 }
+                // Sisa buffer tanpa newline (mis. "data: [DONE]" kepotong di chunk terakhir) — proses biar doneReceived akurat.
+                try {
+                    var tail = (buffer || '').trim();
+                    if (tail) {
+                        if (tail.startsWith('data:')) tail = tail.substring(5).trim();
+                        if (tail === '[DONE]' || tail === '"[DONE]"' || tail === "'[DONE]'") { doneReceived = true; }
+                        else {
+                            try {
+                                var tParsed = JSON.parse(tail);
+                                var tDelta = tParsed.choices && tParsed.choices[0] && tParsed.choices[0].delta;
+                                var tPiece = (tDelta && tDelta.content) || '';
+                                if (tPiece) { fullContent += cleanReasoningMarkers(tPiece); myStream.fullContent = fullContent; }
+                            } catch(e2) {}
+                        }
+                    }
+                } catch(eBuf) {}
+                buffer = '';
                 if (mySessionId === activeSessionId) stopElapsed();
                 if (Object.keys(sessionStreams).length <= 1) stopKeepaliveBeacon();
                 termLog('ok', '✔ stream kelar · ' + tokenCount + ' tokens');
@@ -2697,11 +2715,8 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     if (window.__clientLog) window.__clientLog('warn', 'empty reply but [DONE] received', null);
                 }
 
-                if (!doneReceived && fullContent && fullContent.indexOf('⚠️') !== 0) {
-                    if (fullContent.toLowerCase().indexOf('ketik lanjut') === -1) fullContent += '\n\n⚠️ *Stream berhenti sebelum Done — ketik `lanjut` untuk meneruskan di chat yang sama.*';
-                } else if (doneReceived && !fullContent) {
-                    fullContent = fullContent || '⚠️ Maaf, Gak ada balesan..';
-                }
+                // Konten sudah ada (walau DONE tak ketangkap): anggap selesai apa adanya —
+                // JANGAN tempel warning "berhenti sebelum Done". Resume run_id sudah dicoba di atas.
                 fullContent += flushReasoningFilter();
                 if (mySessionId === activeSessionId) { SR.flush(fullContent, rdItems); SR.stop(); }
                 if (approvalCards.length && mySessionId === activeSessionId) {

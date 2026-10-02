@@ -2548,7 +2548,8 @@ class Agent:
                     raise PermanentError(str(_err)[:120])
 
                 if not (d.get("choices") or []):
-                    break
+                    # usage-only / status chunk (mis. {"usage":{...}} sesudah finish) bukan akhir stream — skip, jangan break biar konten tidak kepotong.
+                    continue
 
                 ch = (d.get("choices") or [{}])[0]
                 delta = ch.get("delta") or {}
