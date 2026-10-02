@@ -1519,8 +1519,10 @@
         for (var i = 0; i < items.length; i++) {
             if (items[i]._t === 'tool' && ACT_PANE_KINDS[items[i].kind]) { last = items[i]; count++; idx = count; }
         }
-        if (last && actPaneCurId !== last.id) actPaneHiddenByUser = false;
-        var show = (!!last || live) && !actPaneHiddenByUser;
+        if (last && actPaneCurId !== last.id && live) actPaneHiddenByUser = false;
+        // Auto-hide saat stream selesai: pane cuma tampil pas live (kerja).
+        // Review terakhir ikut hilang sendiri, tidak nempel "selesai".
+        var show = live && !actPaneHiddenByUser;
         actPane.hidden = !show;
         if (actPaneToggleBtn) actPaneToggleBtn.classList.toggle('on', !actPane.hidden);
         if (actPaneDotEl) actPaneDotEl.classList.toggle('live', live);

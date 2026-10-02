@@ -251,7 +251,6 @@ function get_file_version ($path )
                 <button type="button" class="header-btn install-btn" id="install-btn" title="Install sebagai App (PWA)" hidden>Install</button>
                 <button type="button" class="header-btn theme-toggle" id="theme-toggle" title="Mode Gelap">🌙</button>
 
-                <button type="button" class="header-btn pane-toggle" id="act-pane-toggle" title="Live Agent — show/hide jendela review">A_</button>
                 <button type="button" class="header-btn term-toggle" id="term-btn" title="Terminal Live — lihat aktivitas agent real-time">&gt;_</button>
             </div>
         </div>
