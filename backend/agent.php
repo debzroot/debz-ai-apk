@@ -670,6 +670,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
             }else {
                 $detail = native_tool_arg_summary($toolName,$args);
                 if(function_exists('emit'))emit(['type' => 'tool','phase' => 'start','id' => $callId,'name' => $toolName,'detail' => $detail]);
+                if(in_array($toolName,['web_search','webfetch','http_request','browser','computer_use','shell','search'],true))native_keepalive_note($toolName.' lagi jalan (bisa 30-60 dtk)');
                 if($toolName === 'write_file') {
                     $wp = native_write_file_preview($args);
                     if($wp !== null && function_exists('emit'))emit(['type' => 'tool','phase' => 'preview','id' => $callId,'name' => $toolName]+ $wp);
@@ -1699,6 +1700,11 @@ function native_heartbeat(): void {
         if(function_exists('ob_flush'))@ob_flush();
         if(function_exists('flush'))flush();
     }
+}
+function native_keepalive_note(string $detail = ''): void {
+    if(! function_exists('emit'))return;
+    if($detail !== '')emit(['type' => 'tool','phase' => 'start','id' => 'hb_'.substr(md5((string)microtime(true)),0,8),'name' => 'kerja','detail' => $detail]);
+    native_heartbeat();
 }
 function native_sleep_heartbeat(int $ms): void {
     $step = 5000;

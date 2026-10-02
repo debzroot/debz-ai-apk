@@ -2358,9 +2358,11 @@
             var myGen = ++streamGen;          // gen stream ini
             var mySessionId = activeSessionId; // session yang boleh ditulis stream ini
             var mySessionObj = getSession(mySessionId); // object session asli (stream nulis ke sini walau pindah view)
+            kaStreamId = 'ka' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
             var abortController = new AbortController();
             var myStream = { gen: myGen, abort: abortController, runId: '', kaId: kaStreamId, fullContent: '', rdItems: [], busy: true, el: null, assistantIndex: assistantIndex, t0: Date.now() };
             sessionStreams[mySessionId] = myStream;
+            try { if (window.DebzAndroid && window.DebzAndroid.keepAwake) window.DebzAndroid.keepAwake(true); } catch(e) {}
 
             try {
                 var systemPrompt = `Anda adalah Debz AI, Polyglot Principal Software Engineer, Senior Enterprise Architect, dan Expert Code Reviewer yang menguasai seluruh ekosistem pemrograman (JavaScript/TypeScript, Python, Go, Rust, Java, C++, C#, PHP, HTML, CSS, Ruby, SQL, serta berbagai framework modern). Anda memberikan jawaban dengan ketepatan analisis tingkat tinggi sekelas Gemini Pro dan GPT-4o.
@@ -2389,7 +2391,6 @@ Secara otomatis, Anda wajib menyesuaikan diri berdasarkan bahasa pemrograman yan
 4. SIKAP REVIEWS & KOREKSI CRITICAL
    Jika pendekatan atau arsitektur kode yang saya berikan suboptimal, rentan bug, atau tidak aman, koreksi saya secara langsung dan tunjukkan letak kesalahannya beserta solusi alternatif yang lebih efisien.`;
                 var formData = new FormData();
-                kaStreamId = 'ka' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
                 formData.append('ka_id', kaStreamId);
                 if (activeSessionId) formData.append('thread_id', activeSessionId);
 
@@ -2426,7 +2427,9 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 var response = await fetch(API_URL, {
                     method: 'POST',
                     signal: abortController.signal,
-                    body: formData
+                    body: formData,
+                    cache: 'no-store',
+                    headers: { 'Accept': 'text/event-stream' }
                 });
 
                 if (!response.ok) {
@@ -2448,6 +2451,18 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     return;
                 }
 
+                if (!response.body || !response.body.getReader) {
+                    var txtAll = await response.text();
+                    fullContent = txtAll || '';
+                    if (mySessionId === activeSessionId) { SR.start(placeholder.querySelector('.msg-text')); SR.flush(fullContent, []); SR.stop(); }
+                    mySessionObj.messages[assistantIndex].content = fullContent || '⚠️ Stream gak didukung WebView ini — coba update APK.';
+                    saveStore(); renderSessionList();
+                    delete sessionStreams[mySessionId];
+                    if (mySessionId === activeSessionId) { setBusy(false); hideProgress(); }
+                    if (Object.keys(sessionStreams).length === 0) stopKeepaliveBeacon();
+                    try { if (window.DebzAndroid && window.DebzAndroid.keepAwake) window.DebzAndroid.keepAwake(false); } catch(e) {}
+                    return;
+                }
                 var reader = response.body.getReader();
                 var decoder = new TextDecoder("utf-8");
                 var fullContent = '';
@@ -2581,7 +2596,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                             }
 
                             if (parsed.type === 'run_started') {
-                                currentStreamRunId = parsed.run_id || '';
+                                if (parsed.run_id && parsed.run_id.indexOf('local_') !== 0) currentStreamRunId = parsed.run_id;
                                 myStream.runId = currentStreamRunId;
                                 continue;
                             }
@@ -2702,6 +2717,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 // Kalau kita punya run_id, resume via polling status — bukan drama "gak ada balesan".
                 if (!doneReceived && currentStreamRunId) {
                     try { clearInterval(idleTimer); } catch(e) {}
+                    try { if (window.DebzAndroid && window.DebzAndroid.keepAwake) window.DebzAndroid.keepAwake(false); } catch(e) {}
                     var resumed = await resumeFromRunStatus();
                     if (resumed) {
                         abortController = null;
@@ -2765,6 +2781,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     // Network error di tengah stream? Coba resume via run_status dulu
                     if (currentStreamRunId && mySessionId === activeSessionId) {
                         try { clearInterval(idleTimer); } catch(e) {}
+                        try { if (window.DebzAndroid && window.DebzAndroid.keepAwake) window.DebzAndroid.keepAwake(false); } catch(e) {}
                         var resumedErr = await resumeFromRunStatus('Koneksi error — resume otomatis...');
                         if (resumedErr) {
                             abortController = null;
@@ -2796,6 +2813,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 if (mySessionId === activeSessionId) hideProgress();
             } finally {
                 try { clearInterval(idleTimer); } catch(e) {}
+                try { if (window.DebzAndroid && window.DebzAndroid.keepAwake) window.DebzAndroid.keepAwake(false); } catch(e) {}
                 if (mySessionId === activeSessionId) SR.stop();
                 actStreamEnd(myStream);
                 if (!actHistories) { var actHistories = {}; } // historyLintasStream (persisten stlh stream selesai)

@@ -150,6 +150,8 @@ public class MainActivity extends Activity {
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
+        ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        ws.setJavaScriptCanOpenWindowsAutomatically(false);
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request,
@@ -191,6 +193,7 @@ public class MainActivity extends Activity {
             DebzConfig.setPermAsked(this);
             askFileAccess();
         }
+        askBatteryExemptionOnce();
         poll = new Handler(Looper.getMainLooper());
         poll.post(poller);
         // Ketuk notif update -> langsung mulai tap-to-update.
@@ -294,7 +297,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        try { if (web != null) web.onResume(); } catch (Exception ignored) {}
         updateStatus();
+    }
+
+    @Override
+    protected void onPause() {
+        try { if (web != null) web.onPause(); } catch (Exception ignored) {}
+        super.onPause();
     }
 
     @Override
@@ -402,7 +412,46 @@ public class MainActivity extends Activity {
                 return "";
             }
         }
+
+        // Dipanggil JS saat stream mulai/selesai: tahan CPU+WiFi biar
+        // Doze gak matiin SSE pas tool lama (websearch 30-60 dtk).
+        @JavascriptInterface
+        public void keepAwake(boolean on) {
+            runOnUiThread(() -> {
+                try {
+                    if (on) {
+                        android.os.PowerManager pm = (android.os.PowerManager)
+                            getSystemService(android.content.Context.POWER_SERVICE);
+                        if (pm != null && chatWl == null) {
+                            chatWl = pm.newWakeLock(
+                                android.os.PowerManager.PARTIAL_WAKE_LOCK, "debz:chat");
+                            chatWl.acquire(10 * 60 * 1000L);
+                        }
+                        android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
+                            getApplicationContext().getSystemService(android.content.Context.WIFI_SERVICE);
+                        if (wm != null && chatWifi == null) {
+                            chatWifi = wm.createWifiLock(
+                                android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "debz:chat");
+                            chatWifi.acquire();
+                        }
+                    } else {
+                        if (chatWl != null) {
+                            try { if (chatWl.isHeld()) chatWl.release(); } catch (Exception ignored) {}
+                            chatWl = null;
+                        }
+                        if (chatWifi != null) {
+                            try { if (chatWifi.isHeld()) chatWifi.release(); } catch (Exception ignored) {}
+                            chatWifi = null;
+                        }
+                    }
+                } catch (Exception e) {
+                    android.util.Log.w("DebzAI", "keepAwake skip: " + e);
+                }
+            });
+        }
     }
+    private android.os.PowerManager.WakeLock chatWl = null;
+    private android.net.wifi.WifiManager.WifiLock chatWifi = null;
 
     private void loadBackend() {
         int port = DebzConfig.webPort(this);
@@ -548,6 +597,26 @@ public class MainActivity extends Activity {
         requestPermissions(new String[]{
             android.Manifest.permission.READ_EXTERNAL_STORAGE,
             android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+    }
+
+    private void askBatteryExemptionOnce() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+            android.content.SharedPreferences sp = getSharedPreferences("debz", MODE_PRIVATE);
+            if (sp.getBoolean("batt_asked", false)) return;
+            android.os.PowerManager pm = (android.os.PowerManager)
+                getSystemService(android.content.Context.POWER_SERVICE);
+            if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                sp.edit().putBoolean("batt_asked", true).apply();
+                return;
+            }
+            sp.edit().putBoolean("batt_asked", true).apply();
+            try {
+                startActivity(new Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())));
+            } catch (Exception ignored) {}
+        } catch (Exception ignored) {}
     }
 
     @Override

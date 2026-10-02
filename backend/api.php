@@ -733,6 +733,10 @@ if(empty($messages)|| ! is_array($messages)) {
 header('Cache-Control: no-cache, no-transform');
 header('Connection: keep-alive');
 header('X-Accel-Buffering: no');
+echo str_repeat(' ',2048)."\n";
+echo ": ka\n\n";
+if(function_exists('ob_flush'))@ob_flush();
+flush();
 require_once __DIR__.'/agent.php';
 if($P && in_array(($P['mode']?? 'chat'),['native','chat','opencode-cli'],true)) {
     $messagesIn = [];
@@ -758,6 +762,9 @@ if($P && in_array(($P['mode']?? 'chat'),['native','chat','opencode-cli'],true)) 
     if($maxTok < 0)$maxTok = 0;
     $toolsOn = ($_POST['tools']?? '1')!== '0';
     $allowSessionIn = (($_POST['approval_session']?? '0')=== '1');
+    $cliKa = trim((string)($_POST['ka_id']?? ''));
+    if($cliKa === '')$cliKa = 'ka'.date('YmdHis').substr(md5((string)microtime(true)),0,6);
+    emit(['type' => 'run_started','run_id' => 'local_'.$cliKa,'ka_id' => $cliKa]);
     emit(['type' => 'status','phase' => 'thinking']);
     if($routing !== 'fixed') {
         $chainNames = [];
