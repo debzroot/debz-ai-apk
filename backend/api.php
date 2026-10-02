@@ -946,7 +946,15 @@ if(! $hasImages && $userMessage !== '') {
         curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
         curl_setopt($ch,CURLOPT_HTTPHEADER,['Authorization: Bearer '.$apiKey,'Accept: text/event-stream']);
         curl_setopt($ch,CURLOPT_CONNECTTIMEOUT,30);
-        curl_setopt($ch,CURLOPT_TIMEOUT,300);
+        // TIMEOUT 0 = unlimited.-loop di bawah udah yang jaga batas 30 mnt,
+        // clientIsGone() (ka 150 dtk), dan approval 15 mnt. TIMEOUT 300
+        // bunuh stream di menit kelima,.emitDone() kepanggil, frontend
+        // nge-doneReceived=true -> resume di-skip -> "stream berhenti
+        // sebelum selesai" tanpa warning. Low-speed guard tetap nyisa
+        // biar socket upstream beneran mati gak nge-hang 30 mnt.
+        curl_setopt($ch,CURLOPT_TIMEOUT,0);
+        curl_setopt($ch,CURLOPT_LOW_SPEED_LIMIT,1);
+        curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,120);
         curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
         curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
         curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,0);
@@ -1076,7 +1084,10 @@ if(! $hasImages && $userMessage !== '') {
         if($curlErrno !== 0) {
             emit(['choices' =>[['delta' =>['content' => '⚠️ **System Error:** stream run gagal - '.$curlError]]]]);
         }
-        if(! $doneSent)emitDone();
+        // Socket mati di tengah jalan JANGAN emitDone: frontend cuma nge-resume
+        // kalau stream berakhir tanpa [DONE]. Paksa DONE di sini = jawaban
+        // dipotong diam-diam, sisa teks ilang.
+        if(! $doneSent && ! ($curlErrno !== 0 && $emittedAnything))emitDone();
         exit;
     }
 }$input = [];
@@ -1208,7 +1219,11 @@ curl_setopt($ch,CURLOPT_HTTPHEADER,['Authorization: Bearer '.$apiKey,'Content-Ty
 curl_setopt($ch,CURLOPT_POST,true);
 curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($payload,JSON_UNESCAPED_UNICODE));
 curl_setopt($ch,CURLOPT_CONNECTTIMEOUT,30);
-curl_setopt($ch,CURLOPT_TIMEOUT,300);
+// Unlimited, sama kayak jalur /runs/events di atas: batas 30 mnt + ka 150 dtk
+// yang pegang. 300 dtk = stream kepotong pas lagi panjang.
+curl_setopt($ch,CURLOPT_TIMEOUT,0);
+curl_setopt($ch,CURLOPT_LOW_SPEED_LIMIT,1);
+curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,120);
 curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
 curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
 curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,0);
@@ -1295,6 +1310,6 @@ if($rest !== '') {
 if($curlErrno !== 0) {
     emit(['choices' =>[['delta' =>['content' => '⚠️ **System Error:** cURL gagal - '.$curlError]]]]);
 }
-if(! $doneSent) {
+if(! $doneSent && ! ($curlErrno !== 0 && $emittedAnything)) {
     emitDone();
 }

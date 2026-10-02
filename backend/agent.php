@@ -311,13 +311,20 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
         }
         return strlen($chunk);
     };
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 150,CURLOPT_LOW_SPEED_LIMIT => 10,CURLOPT_LOW_SPEED_TIME => 20,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write]);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 0,CURLOPT_LOW_SPEED_LIMIT => 10,CURLOPT_LOW_SPEED_TIME => 20,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write]);
     if(! empty($opts['_sslFallback'])) {
         if(function_exists('termEmit'))termEmit('info',"🔒 SSL verify disabled (fallback mode)");
     }$px = '';
     // PROXY-FREE: direct selalu, tanpa pool/wait/hold.
-    curl_setopt($ch,CURLOPT_TIMEOUT,max(45,native_config_int('AI_PROXY_CURL_TIMEOUT',120)));
-    curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,max(8,native_config_int('AI_PROXY_LOWSPEED_S',25)));$ok = curl_exec($ch);
+    // Budget stream native = 30 mnt, sama kayak jalur opencode-card
+    // (--max-time 1800) dan cap internal /runs/events. Default lama 120 dtk
+    // itu sisa jaman proxy: agent loop bisa 128 iterasi dan tiap iterasi
+    // mangsa provider yg mikir lama, jadi 120 dtk = hampir tiap turn
+    // panjang mati di tengah (errno 28) -> "stream berhenti sebelum selesai".
+    // Deteksi koneksi beneran mati tetappegang LOW_SPEED, jadi 30 mnt bukan
+    // socket mati yg menggantung.
+    curl_setopt($ch,CURLOPT_TIMEOUT,max(300,native_config_int('AI_PROXY_CURL_TIMEOUT',1800)));
+    curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,max(30,native_config_int('AI_PROXY_LOWSPEED_S',45)));$ok = curl_exec($ch);
     $errno = curl_errno($ch);
     $error = curl_error($ch);
     $httpCode = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
