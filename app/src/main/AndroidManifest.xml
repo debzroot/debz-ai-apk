@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- TAP-TO-UPDATE: install sesi PackageInstaller buat update sendiri.
+         Sideload-only (bukan Play): user cukup ketuk notif/banner ->
+         unduh APK -> konfirmasi Install sistem. Tanpa uninstall manual,
+         data workspace tetap utuh (tanda tangan stabil, lihat build.gradle). -->
     <!-- Storage DIBUTUHKAN: bind /sdcard -> /mnt/sdcard di proot cuma jalan kalau
          uid app boleh baca storage. API 26-32: READ (+WRITE max 28). API 30+:
          MANAGE_EXTERNAL_STORAGE via Settings (sideload, bukan Play).

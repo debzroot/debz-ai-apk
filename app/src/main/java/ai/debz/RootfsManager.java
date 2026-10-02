@@ -112,9 +112,13 @@ public final class RootfsManager {
         if (ready(ctx) && !new File(dir(ctx), "bin/sh").exists()) {
             wipe(ctx);
         }
-        // tarball baru (epoch beda) -> extract ulang biar backend/conf baru
-        // kepasang; kalau nggak, device jalanin skrip lawas selamanya.
-        if (ready(ctx) && !epochOk(ctx)) wipe(ctx);
+        // tarball baru (epoch beda) -> backup data user dulu, baru extract
+        // ulang biar backend/conf baru kepasang; kalau nggak, device
+        // jalanin skrip lawas selamanya.
+        if (ready(ctx) && !epochOk(ctx)) {
+            backupUserData(ctx);
+            wipe(ctx);
+        }
         if (ready(ctx)) return;
         String asset = bundledName(ctx);
         if (asset == null) throw new Exception("rootfs tidak dibundle di APK");
@@ -156,6 +160,7 @@ public final class RootfsManager {
         extract(pkg, gzipped, d, cb);
         if (!marker(ctx).createNewFile()) throw new Exception("marker gagal");
         writeEpoch(ctx);
+        restoreUserData(ctx);
         pkg.delete();
         if (cb != null) cb.on("done", 100);
     }
@@ -470,6 +475,77 @@ public final class RootfsManager {
     }
 
     // hapus RF lama (dipakai OTA/ganti versi)
+    // SAFETY NET uninstall/wipe: data user (Workspaces, notes.db, config)
+    // hidup di storage app-private yang ikut terhapus saat uninstall.
+    // Sebelum wipe, salin best-effort ke /sdcard/debz-backup/ (lolos
+    // uninstall); setelah extract segar, kembalikan file yang hilang.
+    // Tak boleh menggagalkan wipe/extract: semua error ditelan + log.
+    private static File backupRoot() {
+        File a = new File("/sdcard/debz-backup");
+        try {
+            if (a.canWrite() || a.mkdirs()) return a;
+        } catch (Exception ignored) {}
+        try {
+            File b = new File("/storage/emulated/0/debz-backup");
+            if (b.canWrite() || b.mkdirs()) return b;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static void backupUserData(Context ctx) {
+        try {
+            File dst = backupRoot();
+            if (dst == null) return;
+            File base = new File(dir(ctx), "opt/debz");
+            copyMissing(new File(base, "Workspaces"), new File(dst, "Workspaces"));
+            copyMissing(new File(base, "app/notes.db"), new File(dst, "notes.db"));
+            copyMissing(new File(base, "app/.ai-config.ini"), new File(dst, ".ai-config.ini"));
+            copyMissing(new File(base, "app/.ai-providers.json"), new File(dst, ".ai-providers.json"));
+            android.util.Log.i("DebzAI", "backup user ke " + dst.getAbsolutePath());
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "backup user skip: " + e);
+        }
+    }
+
+    private static void restoreUserData(Context ctx) {
+        try {
+            File dst = backupRoot();
+            if (dst == null || !dst.isDirectory()) return;
+            File base = new File(dir(ctx), "opt/debz");
+            copyMissing(new File(dst, "Workspaces"), new File(base, "Workspaces"));
+            copyMissing(new File(dst, "notes.db"), new File(base, "app/notes.db"));
+            copyMissing(new File(dst, ".ai-config.ini"), new File(base, "app/.ai-config.ini"));
+            copyMissing(new File(dst, ".ai-providers.json"), new File(base, "app/.ai-providers.json"));
+            android.util.Log.i("DebzAI", "restore user dari " + dst.getAbsolutePath());
+        } catch (Exception e) {
+            android.util.Log.w("DebzAI", "restore user skip: " + e);
+        }
+    }
+
+    // Salin src -> dst hanya untuk file/dir yang belum ada di dst
+    // (merge, tak menimpa seed segar). Symlink dilewat.
+    private static void copyMissing(File src, File dst) {
+        try {
+            if (src == null || !src.exists()) return;
+            if (java.nio.file.Files.isSymbolicLink(src.toPath())) return;
+            if (src.isDirectory()) {
+                if (!dst.exists() && !dst.mkdirs() && !dst.isDirectory()) return;
+                File[] kids = src.listFiles();
+                if (kids != null) for (File k : kids) copyMissing(k, new File(dst, k.getName()));
+                return;
+            }
+            if (dst.exists()) return;
+            File parent = dst.getParentFile();
+            if (parent != null) parent.mkdirs();
+            try (java.io.InputStream in = new java.io.FileInputStream(src);
+                 java.io.OutputStream out = new java.io.FileOutputStream(dst)) {
+                byte[] buf = new byte[32768];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            }
+        } catch (Exception ignored) {}
+    }
+
     public static void wipe(Context ctx) {
         deleteRec(dir(ctx));
     }

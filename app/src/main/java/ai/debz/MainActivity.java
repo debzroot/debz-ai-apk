@@ -163,6 +163,67 @@ public class MainActivity extends Activity {
         }
         poll = new Handler(Looper.getMainLooper());
         poll.post(poller);
+        // Ketuk notif update -> langsung mulai tap-to-update.
+        handleUpdateIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleUpdateIntent(intent);
+    }
+
+    // Intent ACTION_UPDATE (notif/banner) -> unduh + install otomatis.
+    // Intent ACTION_INSTALL_RESULT (PackageInstaller) -> toast hasil.
+    private void handleUpdateIntent(Intent intent) {
+        if (intent == null || intent.getAction() == null) return;
+        String a = intent.getAction();
+        if (OtaManager.ACTION_INSTALL_RESULT.equals(a)) {
+            int st = intent.getIntExtra(
+                android.content.pm.PackageInstaller.EXTRA_STATUS,
+                android.content.pm.PackageInstaller.STATUS_FAILURE);
+            String msg = intent.getStringExtra(
+                android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
+            if (st == android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+                Toast.makeText(this, "Update terpasang.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Install gagal: " + msg, Toast.LENGTH_LONG).show();
+            }
+            setIntent(new Intent());
+            return;
+        }
+        if (!OtaManager.ACTION_UPDATE.equals(a)) return;
+        setIntent(new Intent());
+        startTapUpdate();
+    }
+
+    private void startTapUpdate() {
+        if (!DebzConfig.updateAvailable(this) && !OtaManager.downloading) {
+            Toast.makeText(this, "Tidak ada update.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, "Mengunduh update…", Toast.LENGTH_SHORT).show();
+        final android.content.Context appCtx = getApplicationContext();
+        OtaManager.downloadAndInstall(appCtx, new OtaManager.Listener() {
+            @Override public void onProgress(int pct) { /* poll via updateState */ }
+            @Override public void onDone(final String msg) {
+                runOnUiThread(() -> {
+                    try {
+                        if (!isFinishing()) Toast.makeText(MainActivity.this,
+                            "⬆ " + msg, Toast.LENGTH_LONG).show();
+                    } catch (Exception ignored) {}
+                });
+            }
+            @Override public void onError(final String msg) {
+                runOnUiThread(() -> {
+                    try {
+                        if (!isFinishing()) Toast.makeText(MainActivity.this,
+                            "Update gagal: " + msg, Toast.LENGTH_LONG).show();
+                    } catch (Exception ignored) {}
+                });
+            }
+        });
     }
 
     private final Runnable poller = new Runnable() {
@@ -255,6 +316,21 @@ public class MainActivity extends Activity {
                 + ",\"web\":" + webPort + ",\"api\":" + apiPort
                 + ",\"tools\":" + toolsPort
                 + ",\"update\":\"" + upd.replace("\"", "") + "\"}";
+        }
+
+        // Dipanggil tombol "Update" di WebUI: mulai tap-to-update.
+        @JavascriptInterface
+        public String startUpdate() {
+            runOnUiThread(() -> startTapUpdate());
+            return "started";
+        }
+
+        // Poll status unduh: downloading|pct|error.
+        @JavascriptInterface
+        public String updateState() {
+            return "{\"downloading\":" + OtaManager.downloading
+                + ",\"pct\":" + OtaManager.progressPct
+                + ",\"error\":\"" + OtaManager.lastError.replace("\"", "") + "\"}";
         }
     }
 

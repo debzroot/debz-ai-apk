@@ -2,12 +2,19 @@ plugins {
     id("com.android.application")
 }
 
-// Signing key comes from env (CI secret), never from the repo: runner-generated
-// debug keys change every build, so an upgrade would die with
-// INSTALL_FAILED_UPDATE_INCOMPATIBLE and force a wipe of the 130MB rootfs.
+// Signing key: prioritas secret CI (DEBZ_KEYSTORE path + password + alias).
+// Tanpa secret -> keystore fallback yang di-cache antar run CI (lihat
+// workflow "Siapkan signing key") + password/alias default di bawah.
+// JANGAN fallback ke debug key runner: debug key ganti tiap build ->
+// INSTALL_FAILED_UPDATE_INCOMPATIBLE -> user dipaksa uninstall (= data
+// workspace hilang). Tanda tangan harus stabil antar build.
 def keystoreFile = System.getenv("DEBZ_KEYSTORE")
-def keystorePass = System.getenv("DEBZ_KEYSTORE_PASSWORD")
-def keystoreAlias = System.getenv("DEBZ_KEY_ALIAS")
+def _envPass = System.getenv("DEBZ_KEYSTORE_PASSWORD")
+def _envAlias = System.getenv("DEBZ_KEY_ALIAS")
+// trim: workflow selalu export var (kosong kalau secret unset); string kosong
+// harus jatuh ke default, bukan jadi password "".
+def keystorePass = (_envPass != null && !_envPass.trim().isEmpty()) ? _envPass : "debz-fallback-2026"
+def keystoreAlias = (_envAlias != null && !_envAlias.trim().isEmpty()) ? _envAlias : "debz"
 
 android {
     namespace = "ai.debz"
@@ -36,7 +43,7 @@ android {
     }
 
     signingConfigs {
-        if (keystoreFile && keystorePass && keystoreAlias && file(keystoreFile).exists()) {
+        if (keystoreFile && file(keystoreFile).exists()) {
             create("release") {
                 storeFile = file(keystoreFile)
                 storePassword = keystorePass
@@ -49,7 +56,11 @@ android {
     buildTypes {
         release {
             minifyEnabled = false
-            signingConfig = keystoreFile ? signingConfigs.getByName("release") : signingConfigs.getByName("debug")
+            // keystore fallback wajib ada (repo/CI sediakan); debug key
+            // runner dilarang karena tanda tangan berubah tiap build.
+            signingConfig = (keystoreFile && file(keystoreFile).exists())
+                ? signingConfigs.getByName("release")
+                : signingConfigs.getByName("debug")
         }
         // tanpa applicationIdSuffix: debug & release sama-sama ai.debz,
         // jadi ga ada app kembar yang diam-diam nyisa data pas uninstall

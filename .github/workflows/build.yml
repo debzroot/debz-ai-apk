@@ -139,16 +139,31 @@ jobs:
       - name: Cek assets
         run: ls -la app/src/main/assets/
 
-      - name: Siapkan signing key (dari secret, jangan pernah commit)
+      - name: Restore keystore fallback (tanda tangan stabil antar build)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/keys/fallback.jks
+          key: debz-fallback-keystore-v1
+
+      - name: Siapkan signing key (secret dulu, fallback cache, jangan debug)
         env:
           DEBZ_KEYSTORE: ${{ secrets.DEBZ_KEYSTORE_B64 }}
         run: |
           mkdir -p "$RUNNER_TEMP/keys"
-          if [ -z "$DEBZ_KEYSTORE" ]; then
-            echo "::warning::Secret DEBZ_KEYSTORE_B64 kosong — APK akan fallback ke debug key (upgrade next build jadi uninstall)"
-          else
+          if [ -n "$DEBZ_KEYSTORE" ]; then
             printf '%s' "$DEBZ_KEYSTORE" | base64 -d > "$RUNNER_TEMP/keys/debz.jks"
-            echo "KEYSTORE=$RUNNER_TEMP/keys/debz.jks" >> "$GITHUB_ENV"
+            echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/debz.jks" >> "$GITHUB_ENV"
+            echo "key dari secret DEBZ_KEYSTORE_B64"
+          elif [ -f "$RUNNER_TEMP/keys/fallback.jks" ]; then
+            echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/fallback.jks" >> "$GITHUB_ENV"
+            echo "key fallback dari cache (stabil)"
+          else
+            keytool -genkeypair -keystore "$RUNNER_TEMP/keys/fallback.jks" \
+              -alias debz -keyalg RSA -keysize 2048 -validity 9125 \
+              -storepass debz-fallback-2026 -keypass debz-fallback-2026 \
+              -dname "CN=DebzAI sideload, OU=dev, O=debz, L=id, ST=id, C=ID"
+            echo "DEBZ_KEYSTORE=$RUNNER_TEMP/keys/fallback.jks" >> "$GITHUB_ENV"
+            echo "::warning::Secret DEBZ_KEYSTORE_B64 kosong — keystore fallback baru dibuat & di-cache. Selama cache hidup, update tetap tanpa uninstall."
           fi
 
       - uses: gradle/gradle-build-action@v3
