@@ -2477,6 +2477,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                     var nClean = false;
                     var nErr = '';
                     var nWaiter = null;
+                    var nAborted = false;
                     var te = new TextEncoder();
                     __zenJobs[nKey] = {
                         onLine: function(raw) { nQ.push(te.encode(raw + '\n')); if (nWaiter) { var w = nWaiter; nWaiter = null; w(); } },
@@ -2484,6 +2485,17 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                         onError: function(m) { nEnded = true; nErr = m || 'native error'; if (nWaiter) { var w3 = nWaiter; nWaiter = null; w3(); } }
                     };
                     myStream.nativeKey = nKey;
+                    // STOP FIX: signal AbortController tadinya gak nyambung ke fake
+                    // reader native — abort() jadi no-op, reader.read() nunggu nWaiter
+                    // selamanya. Listener ini unblock reader + putus HTTP Java langsung.
+                    try {
+                        abortController.signal.addEventListener('abort', function() {
+                            nAborted = true;
+                            try { zenNativeCancel(nKey); } catch (e) {}
+                            delete __zenJobs[nKey];
+                            if (nWaiter) { var wA = nWaiter; nWaiter = null; try { wA(); } catch (e2) {} }
+                        });
+                    } catch (e) {}
                     var started = '';
                     try {
                         started = zenNativeStart(nKey, {
@@ -2516,6 +2528,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                                 return { read: function() {
                                     return new Promise(function(res) {
                                         function pump() {
+                                            if (abortController.signal.aborted || nAborted) { res({ done: true, value: undefined }); return; }
                                             if (nQ.length) { res({ done: false, value: nQ.shift() }); return; }
                                             if (nEnded) {
                                                 if (nErr && !nClean) res({ done: true, value: undefined });
@@ -2821,6 +2834,18 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 if (Object.keys(sessionStreams).length <= 1) stopKeepaliveBeacon();
                 termLog('ok', '✔ stream kelar · ' + tokenCount + ' tokens');
 
+                // STOP FIX (native): abort native gak throw AbortError — reader pulang
+                // done:true. Tandai selesai manual biar gak nyasar ke resume polling
+                // / warning "berhenti sebelum Done"; flow normal render Dibatalkan.
+                if (myStream && myStream.userAborted) {
+                    doneReceived = true;
+                    currentStreamRunId = '';
+                    myStream.runId = '';
+                    var _abBase = fullContent || SR.text();
+                    fullContent = _abBase ? _abBase + '\n\n*(Dibatalkan)*' : '*(Dibatalkan)*';
+                    myStream.fullContent = fullContent;
+                }
+
                 // Stream berakhir TANPA [DONE] → kemungkinan koneksi beneran putus.
                 // Kalau kita punya run_id, resume via polling status — bukan drama "gak ada balesan".
                 if (!doneReceived && currentStreamRunId) {
@@ -2954,10 +2979,12 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
             var st = sessionStreams[activeSessionId];
             if (st && st.abort) {
                 e.preventDefault();
+                e.stopPropagation();
                 st.userAborted = true;
-                st.abort.abort();
+                try { if (st.nativeKey) zenNativeCancel(st.nativeKey); } catch (err0) {}
+                try { st.abort.abort(); } catch (err1) {}
             }
-        });
+        }, true);
     }
 
     // [FIX] Event delegation — survive DOM rebuild (stream.innerHTML wipe)

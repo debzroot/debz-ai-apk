@@ -34,6 +34,7 @@ public final class ZenStreamClient {
         volatile HttpURLConnection conn;
         volatile Thread thread;
         volatile boolean cancelled;
+        volatile WebView web;
     }
 
     public static boolean isRunning(String key) {
@@ -50,8 +51,29 @@ public final class ZenStreamClient {
             try {
                 if (j.thread != null) j.thread.interrupt();
             } catch (Exception ignored) {}
+            // STOP FIX: notify JS biar fake reader native ke-unblock (nEnded=true),
+            // redundan dgn signal listener di JS tapi aman bila listener blm kepasang.
+            try {
+                if (j.web != null) {
+                    final WebView w = j.web;
+                    final String k = key != null ? key : "";
+                    w.post(() -> {
+                        try {
+                            w.evaluateJavascript(
+                                "window.__zenNativeOnDone(" + JSONObject.quote(k) + ",false);",
+                                null);
+                        } catch (Exception ignored) {}
+                    });
+                }
+            } catch (Exception ignored) {}
         }
-        releaseLocksIfIdle(null);
+        try {
+            Context appCtx = null;
+            try {
+                if (j != null && j.web != null) appCtx = j.web.getContext().getApplicationContext();
+            } catch (Exception ignored) {}
+            releaseLocksIfIdle(appCtx);
+        } catch (Exception ignored) {}
     }
 
     public static String replay(Context ctx, String key) {
@@ -153,6 +175,7 @@ public final class ZenStreamClient {
             android.util.Log.w("DebzAI", "zen svc skip: " + e);
         }
         final Job job = new Job();
+        job.web = web;
         JOBS.put(key, job);
         final Context appCtx = ctx.getApplicationContext();
         job.thread = new Thread(() -> runStream(appCtx, web, key, url, payloadJson, job));
