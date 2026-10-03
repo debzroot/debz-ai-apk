@@ -1,4 +1,12 @@
 <?php require_once __DIR__."/agent-helpers.php";
+// SSE anti-buffer: agent.php di-include SETELAH api.php kirim header+padding,
+// jadi JANGAN header() di sini (bakal warning headers-sent). Cukup matikan
+// buffer sisa + paksa implicit flush biar : ka / heartbeat beneran nyampe.
+@ini_set('output_buffering','off');
+@ini_set('zlib.output_compression','off');
+@ini_set('implicit_flush','1');
+if(function_exists('apache_setenv')){@apache_setenv('no-gzip','1');}
+while(ob_get_level()>0){@ob_end_flush();}
 // Reaper anak proses: tanpa ini, `opencode run`/curl yang di-proc_open bisa
 // jadi orphan (client abort) atau zombie (skrip mati sebelum proc_close).
 $GLOBALS['OC_LIVE_PROCS'] = [];
@@ -107,6 +115,83 @@ function debz_net_preflight(string $baseUrl) {
     $cache[$host] = true;
     return true;
 }
+function native_merge_partial_tools(array $kept,array $fresh): array {
+    foreach($fresh as $pt) {
+        if(!is_array($pt))continue;
+        $name = trim((string)($pt['name']??''));
+        if($name==='')continue;
+        $found = -1;
+        foreach($kept as $i=>$k) {
+            if(trim((string)($k['name']??''))===$name){$found=$i;break;}
+        }
+        if($found>=0) {
+            $kept[$found]['args'] = (string)($kept[$found]['args']??'').(string)($pt['args']??'');
+            if(!empty($pt['id']))$kept[$found]['id'] = (string)$pt['id'];
+            if(!empty($pt['sig']))$kept[$found]['sig'] = $pt['sig'];
+        } else $kept[] = $pt;
+    }
+    return array_slice($kept,-8);
+}
+function native_dedup_append(string $kept,string $fresh): string {
+    if($kept === '' || $fresh === '')return $kept.$fresh;
+    $max = min(500,strlen($kept),strlen($fresh));
+    for($n = $max;$n >= 10;$n --) {
+        if(substr($kept,-$n) === substr($fresh,0,$n))return $kept.substr($fresh,$n);
+    }
+    return $kept.$fresh;
+}
+function native_idem_fingerprint(string $userText,array $messagesIn): string {
+    $tail = '';
+    for($i = count($messagesIn)- 1,$c = 0;$i >= 0 && $c < 2;$i --,$c ++) {
+        $m = $messagesIn[$i];
+        if(is_array($m))$tail .= '|'.($m['role']?? '').':'.substr((string)($m['content']?? ''),-200);
+    }
+    return md5(trim($userText).$tail);
+}
+function native_idem_release(): void {
+    $fp = $GLOBALS['_native_idem_fp']?? null;
+    if(is_resource($fp))@ flock($fp,LOCK_UN);
+    if(is_resource($fp))@ fclose($fp);
+    unset($GLOBALS['_native_idem_fp']);
+}
+function native_idem_begin(string $userText,array $messagesIn) {
+    $tmp = function_exists('sys_get_temp_dir')? sys_get_temp_dir(): '/tmp';
+    $msgId = '';
+    if(isset($_POST['message_id']))$msgId = preg_replace('/[^A-Za-z0-9_-]/','',substr((string)$_POST['message_id'],0,64));
+    elseif(isset($_POST['client_msg_id']))$msgId = preg_replace('/[^A-Za-z0-9_-]/','',substr((string)$_POST['client_msg_id'],0,64));
+    if($msgId !== '') {
+        $seen = $tmp.'/debz_msg_'.$msgId.'.seen';
+        $age = is_file($seen)? time()- (int)@ filemtime($seen): PHP_INT_MAX;
+        if($age < 60)return['dup' => 'message_id '.$msgId.' sudah diproses '.$age.' dtk lalu'];
+        @ file_put_contents($seen,(string)time(),LOCK_EX);
+    }
+    $hash = native_idem_fingerprint($userText,$messagesIn);
+    $now = time();
+    if(! isset($GLOBALS['_last_processed_hash']))$GLOBALS['_last_processed_hash']= [];
+    $last = $GLOBALS['_last_processed_hash'][$hash]?? 0;
+    if($now - (int)$last < 5)return['dup' => 'hash sama dalam 5 dtk (ghost double-click)'];
+    $GLOBALS['_last_processed_hash'][$hash]= $now;
+    $stampF = $tmp.'/debz_run_'.$hash.'.stamp';
+    if(is_file($stampF)) {
+        $prev = (int)@ file_get_contents($stampF);
+        if($prev > 0 && $now - $prev < 5)return['dup' => 'request identik <5 dtk lalu (cross-process)'];
+    }
+    @ file_put_contents($stampF,(string)$now,LOCK_EX);
+    $lockF = $tmp.'/debz_agent_'.$hash.'.lock';
+    $fp = @ fopen($lockF,'c+');
+    if($fp && ! @ flock($fp,LOCK_EX | LOCK_NB)) {
+        @ fclose($fp);
+        return['dup' => 'iterasi sama masih jalan (session lock aktif)'];
+    }
+    if($fp) {
+        $GLOBALS['_native_idem_fp']= $fp;
+        if(! isset($GLOBALS['_native_idem_shutdown'])) {
+            $GLOBALS['_native_idem_shutdown']= true;
+            register_shutdown_function('native_idem_release');
+        }
+    }
+    return['hash' => $hash];
+}
 function native_chat_once(string $baseUrl,string $apiKey,string $model,array $messages,array $tools,int $maxTokens,array $opts = []): array {
     $attempt = 0;
     $stripRD = ! empty($opts['strip_reasoning_details']);
@@ -116,11 +201,14 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
     $resumeOn = native_config_int('AI_RESUME_PARTIAL',1)=== 1;
     $keptContent = '';
     $keptReasoning = '';
+    $keptTools = [];
     while(true) {
         $sendMsgs = $stripRD? native_strip_rd($messages): $messages;
-        if($resumeOn && ($keptContent !== '' || $keptReasoning !== '')) {
+        if($resumeOn && ($keptContent !== '' || $keptReasoning !== '' || !empty($keptTools))) {
             if($keptContent !== '')$sendMsgs[]= ['role' => 'assistant','content' => $keptContent];
-            $sendMsgs[]= ['role' => 'user','content' => 'Lanjutkan tepat dari titik terputus, jangan mengulang dari awal.'];
+            $note = 'Lanjutkan tepat dari titik terputus, jangan mengulang dari awal.';
+            if(!empty($keptTools))$note .= ' Tool call sebelumnya terputus di tengah jalan — JANGAN duplikasi eksekusi tool yang sama, lanjutkan argumen yang belum lengkap saja.';
+            $sendMsgs[]= ['role' => 'user','content' => $note];
         }
         $r = native_chat_once_raw($baseUrl,$apiKey,$model,$sendMsgs,$tools,$maxTokens,$opts);
         if($r['error']=== '' && $r['content']=== '' && empty($r['toolCalls'])&& $r['reasoning']=== '') {
@@ -135,9 +223,10 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
         }
         if($r['error']=== '') {
             if($keptContent !== '' || $keptReasoning !== '') {
-                $r['content'] = $keptContent.(string)$r['content'];
-                $r['reasoning'] = $keptReasoning.(string)$r['reasoning'];
+                $r['content'] = native_dedup_append($keptContent,(string)$r['content']);
+                $r['reasoning'] = native_dedup_append($keptReasoning,(string)$r['reasoning']);
             }
+            if(empty($r['toolCalls']) && !empty($keptTools))$r['toolCalls'] = $keptTools;
             return $r;
         }
         $errTxt = (string)$r['error'];
@@ -149,24 +238,27 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
         $isStall = ! empty($r['stall']);
         if(! $isTransient || $attempt >= $maxRetry) {
             if($resumeOn && ($keptContent !== '' || $keptReasoning !== '')) {
-                $r['content'] = $keptContent.(string)$r['content'];
-                $r['reasoning'] = $keptReasoning.(string)$r['reasoning'];
+                $r['content'] = native_dedup_append($keptContent,(string)$r['content']);
+                $r['reasoning'] = native_dedup_append($keptReasoning,(string)$r['reasoning']);
                 if($r['error']!== '')$r['error'] .= ' (partial disambung dari percobaan sebelumnya)';
             }
+            if(empty($r['toolCalls']) && !empty($keptTools))$r['toolCalls'] = $keptTools;
             return $r;
         }
         if($isStall) {
             if($stallRetries >= $maxStallRetry) {
                 if($resumeOn && ($keptContent !== '' || $keptReasoning !== '')) {
-                    $r['content'] = $keptContent.(string)$r['content'];
-                    $r['reasoning'] = $keptReasoning.(string)$r['reasoning'];
+                    $r['content'] = native_dedup_append($keptContent,(string)$r['content']);
+                    $r['reasoning'] = native_dedup_append($keptReasoning,(string)$r['reasoning']);
                 }
+                if(empty($r['toolCalls']) && !empty($keptTools))$r['toolCalls'] = $keptTools;
                 return $r;
             }
             $stallRetries ++;
-            if($resumeOn && ((string)$r['content'] !== '' || (string)$r['reasoning'] !== '')) {
-                $keptContent = native_trunc($keptContent.(string)$r['content'],4000);
-                $keptReasoning = native_trunc($keptReasoning.(string)$r['reasoning'],4000);
+            if($resumeOn && ((string)$r['content'] !== '' || (string)$r['reasoning'] !== '' || !empty($r['toolCalls']))) {
+                $keptContent = native_trunc(native_dedup_append($keptContent,(string)$r['content']),4000);
+                $keptReasoning = native_trunc(native_dedup_append($keptReasoning,(string)$r['reasoning']),4000);
+                if(!empty($r['toolCalls']))$keptTools = native_merge_partial_tools($keptTools,(array)$r['toolCalls']);
             }
             termEmit('retry',"⏱️ Stall: simpan partial (".strlen($keptContent)." chars), lanjut di rute baru... (stall-retry
             {
@@ -180,10 +272,11 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
             if(function_exists('applog'))applog('NET','stall_retry',['attempt' => $attempt,'partial_content' => strlen((string)$r['content'])]);
         }elseif(($r['content']!== '' || $r['reasoning']!== '')&& ! $isProxyError) {
             return $r;
-        }elseif(($r['content']!== '' || $r['reasoning']!== '')&& $isProxyError) {
+        }elseif(($r['content']!== '' || $r['reasoning']!== '' || !empty($r['toolCalls']))&& $isProxyError) {
             if($resumeOn) {
-                $keptContent = native_trunc($keptContent.(string)$r['content'],4000);
-                $keptReasoning = native_trunc($keptReasoning.(string)$r['reasoning'],4000);
+                $keptContent = native_trunc(native_dedup_append($keptContent,(string)$r['content']),4000);
+                $keptReasoning = native_trunc(native_dedup_append($keptReasoning,(string)$r['reasoning']),4000);
+                if(!empty($r['toolCalls']))$keptTools = native_merge_partial_tools($keptTools,(array)$r['toolCalls']);
                 $pxOn = ! empty($GLOBALS['_debz_last_proxy']);
                 termEmit('retry',"✂️ Stream terputus. Simpan partial (".strlen($keptContent)." chars), ".($pxOn? "putar proxy + lanjutkan...": "sambung lagi otomatis..."));
             }else {
@@ -346,7 +439,7 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
         }
         return strlen($chunk);
     };
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 0,CURLOPT_LOW_SPEED_LIMIT => 10,CURLOPT_LOW_SPEED_TIME => 20,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write,CURLOPT_NOPROGRESS => false,CURLOPT_PROGRESSFUNCTION => function($curl,$dlTotal,$dlNow,$ulTotal,$ulNow): int {
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 0,CURLOPT_LOW_SPEED_LIMIT => 1,CURLOPT_LOW_SPEED_TIME => 90,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write,CURLOPT_NOPROGRESS => false,CURLOPT_PROGRESSFUNCTION => function($curl,$dlTotal,$dlNow,$ulTotal,$ulNow): int {
         // Provider sunyi (mikir/reasoning 30-90 dtk, apalagi pas konteks
         // web_search gede) = curl_exec() blocking tanpa byte -> SSE downstream
         // mati suri -> WebView "BodyStreamBuffer was aborted". Progress callback
@@ -372,7 +465,8 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
     // Deteksi koneksi beneran mati tetappegang LOW_SPEED, jadi 30 mnt bukan
     // socket mati yg menggantung.
     curl_setopt($ch,CURLOPT_TIMEOUT,max(300,native_config_int('AI_PROXY_CURL_TIMEOUT',1800)));
-    curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,max(30,native_config_int('AI_PROXY_LOWSPEED_S',45)));$ok = curl_exec($ch);
+    curl_setopt($ch,CURLOPT_LOW_SPEED_LIMIT,1);
+    curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,max(60,native_config_int('AI_PROXY_LOWSPEED_S',90)));$ok = curl_exec($ch);
     $errno = curl_errno($ch);
     $error = curl_error($ch);
     $httpCode = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
@@ -489,6 +583,13 @@ function native_phase_emit(string $phase,string $msg): void {
 function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $userText,bool $toolsOn = true,array $providerChain = [],? array $PROVIDERS = null,bool $allowSessionIn = false): void {
     @ set_time_limit(0);
     @ ignore_user_abort(true);
+    $idem = native_idem_begin($userText,$messagesIn);
+    if(is_array($idem) && isset($idem['dup'])) {
+        if(function_exists('termEmit'))termEmit('info','⏭️ Duplikat di-skip: '.$idem['dup']);
+        if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => '⏭️ Duplikat request di-skip ('.$idem['dup'].')']);
+        native_idem_release();if(function_exists('emitDone'))emitDone();
+        return;
+    }
     $baseUrl = (string)($P['base_url']?? '');
     $apiKey = (string)($P['api_key']?? '');
     $model = (string)($P['model']?? '');
@@ -614,7 +715,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
                 if(function_exists('emit'))emit(['status' => '⚠️ Error: '.native_trunc($errTxt,90),'progress' => '⚠️ Error: '.native_trunc($errTxt,90),'emoji' => '⚠️']);
                 if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n".($isLimit? "⚠️ **Kena limit 429 nih, Coba pake VPN dulu, atau coba ganti ke provider gratis / berbayar lainnya lalu ketik lanjut**\n\n`": "⚠️ **Provider error:** ").$errTxt]]]]);
                 termEmit('error',native_trunc($errTxt,160));
-                if(function_exists('emitDone'))emitDone();
+                native_idem_release();if(function_exists('emitDone'))emitDone();
                 return;
             }
         }
@@ -679,7 +780,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
                 termEmit('ok','Tugas Selesai ✨ · '.($iter + 1).' iterasi · '.$totalUsage['total_tokens'].' tokens');
                 if($totalUsage['total_tokens']> 0 && function_exists('emit'))emit(['type' => 'usage']+ $totalUsage);
                 native_rag_capture($userText,$finalContent);
-                if(function_exists('emitDone'))emitDone();
+                native_idem_release();if(function_exists('emitDone'))emitDone();
                 return;
             }
             if($emptyRetries < $EMPTY_RETRIES) {
@@ -690,7 +791,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
             }
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ Model tidak menghasilkan jawaban final yang dapat ditampilkan."]]]]);
             termEmit('error','Empty final output');
-            if(function_exists('emitDone'))emitDone();
+            native_idem_release();if(function_exists('emitDone'))emitDone();
             return;
         }$callIds = [];
         foreach($r['toolCalls']as $i => $tc) {
@@ -791,7 +892,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
     ) tercapai.** "]]]]);
     termEmit('limit','Batas Max Iterasi '.$MAX_ITER.' tercapai ⛔');
     if(function_exists('applog'))applog('AGENT','MAX_ITER tercapai',['iter' => $MAX_ITER]);
-    if(function_exists('emitDone'))emitDone();
+    native_idem_release();if(function_exists('emitDone'))emitDone();
 }
 function native_agent_run_opencode_card(array $P,string $model,string $userText,string $openSession,string $mapFile,string $threadId,array $serveCfg,string $bin,bool $allowSessionIn = false,array $attachFiles = [],array $messagesIn = []): void {
     @ set_time_limit(0);
@@ -800,7 +901,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     if(function_exists('applog'))applog('OPENCODE_CARD','start',['model' => $model,'thread' => substr($threadId,0,40),'user_len' => strlen($userText),'files' => count($attachFiles)]);
     if(! debz_card_deps_ok()) {
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Kartu approval butuh binary curl + php-curl** yang tak ada di rootfs lama. Update APK, atau nyalakan Tools (pakai jalur run langsung).\n"]]]]);
-        if(function_exists('emitDone'))emitDone();
+        native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
     }
     $ocTurns = oc_thread_bump($threadId,$openSession);
@@ -849,7 +950,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     }
     if($sid === '') {
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Gagal membuat session opencode serve** (kartu approval).\n"]]]]);
-        if(function_exists('emitDone'))emitDone();
+        native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
     }$sseCmd = ['curl','-s','-N','-u','opencode:'.$pass,'-H','x-opencode-directory: '.$dirEnc,'-H','Accept: text/event-stream',$serverUrl.'/event'];
     $sseDesc = [0 =>['pipe','r'],1 =>['pipe','w'],2 =>['pipe','w']];
@@ -858,7 +959,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
     oc_proc_watch($sseProc);
     if(! is_resource($sseProc)) {
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Gagal subscribe SSE** (kartu approval): ".implode(' ',$sseCmd)."\n"]]]]);
-        if(function_exists('emitDone'))emitDone();
+        native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
     }stream_set_blocking($ssePipes[1],false);
     stream_set_blocking($ssePipes[2],false);
@@ -891,7 +992,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Gagal menjalankan POST message** (kartu approval).\n"]]]]);
         if(is_file($postTmp))@ unlink($postTmp);
         if(isset($postBodyTmp)&& is_file($postBodyTmp))@ unlink($postBodyTmp);
-        if(function_exists('emitDone'))emitDone();
+        native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
     }
     $t0 = time();
@@ -1060,7 +1161,7 @@ function native_agent_run_opencode_card(array $P,string $model,string $userText,
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Serve tidak memancarkan jawaban** (SSE sepi). Coba kirim ulang — kalau berulang, nyalakan Tools (jalur run langsung).\n"]]]]);
         if(function_exists('applog'))applog('OPENCODE_CARD','empty_sse',['thread' => substr($threadId,0,40)]);
     }
-    if(function_exists('emitDone'))emitDone();
+    native_idem_release();if(function_exists('emitDone'))emitDone();
 }
 function native_oc_card_emit(string $evType,array $props,array $evPart): string {
     $progress = '';
@@ -1292,7 +1393,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     $userText = trim((string)$userText);
     if($userText === '') {
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Pesan kosong** — tidak ada yang bisa diproses.\n"]]]]);
-        if(function_exists('emitDone'))emitDone();
+        native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
     }$maxProxyTry = 2; // 1x direct + 1x cadangan khusus empty-retry (engine dingin)
     $cliBaseEnv = getenv();
@@ -1317,7 +1418,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             if($pf !== true) {
                 if(function_exists('termEmit'))termEmit('limit','⚠️ '.$pf);
                 if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **".$pf."**\n"]]]]);
-                if(function_exists('emitDone'))emitDone();
+                native_idem_release();if(function_exists('emitDone'))emitDone();
                 if(function_exists('applog'))applog('CLI','packet_net_preflight_fail',['err' => (string)$pf]);
                 return;
             }
@@ -1392,7 +1493,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         oc_proc_watch($proc);
         if(! is_resource($proc)) {
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Gagal menjalankan opencode CLI.**\n\n".implode(' ',array_map('\strval',$cmd))."\n"]]]]);
-            if(function_exists('emitDone'))emitDone();
+            native_idem_release();if(function_exists('emitDone'))emitDone();
             return;
         }fclose($pipes[0]);
         stream_set_blocking($pipes[1],false);
@@ -1632,7 +1733,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 if(function_exists('termEmit'))termEmit('error','Loop terdeteksi, proses CLI dihentikan.');
             }
             if(function_exists('oc_thread_note_usage'))oc_thread_note_usage($threadId,$stepInMax,$usageTotal);
-            if(function_exists('emitDone'))emitDone();
+            native_idem_release();if(function_exists('emitDone'))emitDone();
             return;
         }$stdoutBuf .= (string)@ stream_get_contents($pipes[1]);
         if(trim($stdoutBuf)!== '') {
@@ -1699,7 +1800,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => $msg]]]]);
             if(function_exists('applog'))applog('OPENCODE_CLI',$errIsLimit? 'empty/exit-429': 'empty/exit',['exit' => $exitCode,'stderr' => substr($err,0,300)]);
         }
-        if(function_exists('emitDone'))emitDone();
+        native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
     }
 }
@@ -1750,11 +1851,13 @@ function native_clean_rd(array $items): array {
     return $out;
 }
 function native_heartbeat(): void {
-    if(function_exists('emit')) {
-        echo ": ka\n\n";
-        if(function_exists('ob_flush'))@ob_flush();
-        if(function_exists('flush'))flush();
-    }
+    if(!function_exists('emit'))return;
+    static $n = 0;
+    $n++;
+    echo ": ka\n\n";
+    if($n===1)echo str_repeat(' ',2048)."\n";
+    while(ob_get_level()>0){@ob_flush();break;}
+    if(function_exists('flush'))flush();
 }
 function native_keepalive_note(string $detail = ''): void {
     if(! function_exists('emit'))return;

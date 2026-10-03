@@ -2354,6 +2354,11 @@
             }
             var text = input ? input.value.trim() : '';
             if (!text && selectedFiles.length === 0) return;
+            // Anti ghost double-click: teks identik <3 dtk = abaikan.
+            var _now = Date.now();
+            if (text && window._lastSendText === text && (_now - (window._lastSendAt || 0)) < 3000) return;
+            window._lastSendText = text; window._lastSendAt = _now;
+            var _mid = 'm' + _now.toString(36) + Math.random().toString(36).slice(2, 10);
             if (text.length > MAX_CHARS) {
                 showToast('Terlalu panjang! Max ' + MAX_CHARS + ' karakter.');
                 return;
@@ -2457,6 +2462,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
 );
                 formData.append('messages', JSON.stringify(historyPayload));
                 formData.append('prompt', text);
+                formData.append('message_id', _mid);
                 formData.append('max_tokens', 8192);
                 formData.append('tools', toolsOn ? '1' : '0');
                 formData.append('stop', JSON.stringify(["</| DSML | invoke>", "EOF", "</| DSML | tool_calls>"]));
