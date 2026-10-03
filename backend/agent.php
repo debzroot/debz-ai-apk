@@ -1395,7 +1395,9 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **Pesan kosong** — tidak ada yang bisa diproses.\n"]]]]);
         native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
-    }$maxProxyTry = 2; // 1x direct + 1x cadangan khusus empty-retry (engine dingin)
+    }
+    if($toolsOn && stripos($userText,'JAWABAN-AKHIR-WAJIB')=== false)$userText .= "\n\n[JAWABAN-AKHIR-WAJIB: setelah memakai tools, WAJIB tulis jawaban akhir untuk user dalam bahasa yang sama — jangan berhenti setelah tools tanpa teks penutup.]";
+    $maxProxyTry = 2; // 1x direct + 1x cadangan khusus empty-retry (engine dingin)
     [$lastStepIn,$lastTotal] = function_exists('oc_thread_last_tokens')? oc_thread_last_tokens($threadId): [0,0];
     if($lastTotal >= 200000 || $lastStepIn >= 150000) {
         $bigCtx = $lastStepIn >= 150000? $lastStepIn: $lastTotal;
@@ -1410,6 +1412,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
     $usageTotal = 0;
     $stepInMax = 0;
     $emptyRetry = 0;
+    $finalChase = 0;
     for($proxyTry = 0;
     $proxyTry < $maxProxyTry;
     $proxyTry ++) {
@@ -1678,7 +1681,22 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                     if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'error','line' => '❌ opencode: '.trunc((string)$em,160)]);
                     $sawContent = true;
                     break;
-                    default: break;
+                    default: $unkTxt = '';
+                     if(isset($part['text'])&& is_string($part['text']))$unkTxt = $part['text'];
+                     elseif(isset($ev['text'])&& is_string($ev['text']))$unkTxt = (string)$ev['text'];
+                     elseif(isset($part['content'])&& is_string($part['content']))$unkTxt = $part['content'];
+                     static $unkLogged = [];
+                     if($t !== '' && ! isset($unkLogged[$t])) {
+                         $unkLogged[$t] = true;
+                         if(function_exists('applog'))applog('OPENCODE_CLI','unknown_evt',['type' => $t,'keys' => implode(',',array_keys($ev))]);
+                     }
+                     if($unkTxt !== '' && stripos($unkTxt,'{')!== 0 && function_exists('emit')) {
+                         emit(['choices' =>[['delta' =>['content' => $unkTxt]]]]);
+                         $sawContent = true;
+                         if($toolSeen)$textAfterTool = true;
+                         $touchProgress();
+                     }
+                     break;
                 }
             }
             // GRACE 180s: WebView/HP sering jeda sesaat (throttle/blip/Doze) hingga
@@ -1792,6 +1810,17 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             emit(['type' => 'usage','input_tokens' => $usageIn,'output_tokens' => $usageOut,'total_tokens' => $usageTotal]);
         }
         if($sawContent && ! $cliTimedOut && ! $loopDetected && ! $clientGone && $toolSeen && ! $textAfterTool) {
+            if($exitCode === 0 && $finalChase < 1) {
+                $finalChase ++;
+                $maxProxyTry ++;
+                if($capsSession !== '')$openSession = $capsSession;
+                $userText = 'Berdasarkan hasil tools di atas, tulis jawaban akhir sekarang tanpa memanggil tools lagi. [JAWABAN-AKHIR-WAJIB]';
+                if(function_exists('termEmit'))termEmit('retry','Hasil tools tanpa jawaban akhir — minta penutup otomatis...');
+                if(function_exists('applog'))applog('OPENCODE_CLI','final_chase',['steps' => $stepCount,'exit' => $exitCode]);
+                if(is_resource($pipes[1]))@ fclose($pipes[1]);
+                if(is_resource($pipes[2]))@ fclose($pipes[2]);
+                continue;
+            }
             if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\nℹ️ **Agent berhenti setelah ".$stepCount." langkah tools tanpa jawaban akhir** (exit ".$exitCode."). Konteks aman — ketik `lanjut` untuk meneruskan.\n"]]]]);
             if(function_exists('termEmit'))termEmit('warn','CLI exit tanpa teks final setelah tools (exit '.$exitCode.', '.$stepCount.' steps) — ketik lanjut.');
         }
