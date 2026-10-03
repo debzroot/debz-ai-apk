@@ -1396,6 +1396,12 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         native_idem_release();if(function_exists('emitDone'))emitDone();
         return;
     }$maxProxyTry = 2; // 1x direct + 1x cadangan khusus empty-retry (engine dingin)
+    [$lastStepIn,$lastTotal] = function_exists('oc_thread_last_tokens')? oc_thread_last_tokens($threadId): [0,0];
+    if($lastTotal >= 200000 || $lastStepIn >= 150000) {
+        $bigCtx = $lastStepIn >= 150000? $lastStepIn: $lastTotal;
+        if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'info','line' => 'ℹ️ Konteks sesi gede (≈'.number_format($bigCtx).' tokens) — token pertama bisa 1-2 menit. Jangan regen/kirim ulang, tungguin aja.']);
+        if(function_exists('termEmit'))termEmit('warn','Konteks gede (≈'.number_format($bigCtx).' tokens) — TTFT bakal lama, heartbeat jalan.');
+    }
     $cliBaseEnv = getenv();
     $cliProxy = '';
     $capsSession = '';
@@ -1695,9 +1701,10 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 $lastBeat = time();
                 native_heartbeat();
             }
-            if((time()- $lastDataBeat)>= 45 && (time()- $lastProgressTs)>= 45) {
+            if((time()- $lastDataBeat)>= 25 && (time()- $lastProgressTs)>= 25) {
                 $lastDataBeat = time();
-                if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking']);
+                $waitS = (int)(time()- $lastProgressTs);
+                if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking','wait_s' => $waitS]);
             }
             // STALL 900s: tool lama tanpa output (CI build/gradle 5-15 mnt sunyi)
             // BUKAN hang — jangan bunuh. Sesi serve persisten, konteks aman.
@@ -1852,12 +1859,12 @@ function native_clean_rd(array $items): array {
 }
 function native_heartbeat(): void {
     if(!function_exists('emit'))return;
-    static $n = 0;
-    $n++;
     echo ": ka\n\n";
-    if($n===1)echo str_repeat(' ',2048)."\n";
+    echo str_repeat(' ',2048)."\n\n";
     while(ob_get_level()>0){@ob_flush();break;}
     if(function_exists('flush'))flush();
+    $sp = (string)($GLOBALS['_sse_spool'] ?? '');
+    if($sp !== ''){@touch($sp);}
 }
 function native_keepalive_note(string $detail = ''): void {
     if(! function_exists('emit'))return;
@@ -2478,7 +2485,7 @@ function native_oc_tool_preview(string $tool,array $st,string $detail):? array {
         if(trim($out)=== '')return null;
         return['kind' => 'exec','path' => native_trunc(preg_replace('/\s+/',' ',(string)($inp['command']?? $detail)),40),'text' => native_trunc($out,15000)];
     }
-    if(in_array($tool,['grep','glob','search','websearch','list','ls','fs_list'],true)) {
+    if(in_array($tool,['grep','glob','search','websearch','web_search','webfetch','fetch','list','ls','fs_list'],true)) {
         if(trim($out)=== '')return null;
         return['kind' => 'search','path' => native_trunc($detail,40),'text' => native_trunc($out,8000)];
     }

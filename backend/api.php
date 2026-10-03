@@ -581,6 +581,28 @@ if(isset($_GET['action'])&& $_GET['action']=== 'run_status') {
         http_response_code(400);
         echo json_encode(['error' => 'run_id wajib']);
         exit;
+    }
+    if(strpos($rid,'local_') === 0) {
+        $sf = sse_spool_path($rid);
+        foreach((array)@glob(sys_get_temp_dir().'/c0n73xt_spool_*.json') as $oldSp) {
+            if(@filemtime($oldSp) < time() - 7200)@unlink($oldSp);
+        }
+        if(!is_file($sf)) {
+            http_response_code(404);
+            echo json_encode(['status' => 'missing','output' => '']);
+            exit;
+        }
+        $sd = json_decode((string)@file_get_contents($sf),true);
+        if(!is_array($sd)) {
+            http_response_code(404);
+            echo json_encode(['status' => 'missing','output' => '']);
+            exit;
+        }
+        $st = (string)($sd['status'] ?? 'running');
+        $stale = time() - (int)@filemtime($sf);
+        if($st === 'running' && $stale > 300)$st = 'failed';
+        echo json_encode(['status' => $st,'output' => (string)($sd['output'] ?? ''),'usage' => $sd['usage'] ?? null,'updated' => (int)($sd['updated'] ?? 0),'error' => $st === 'failed' ? 'backend sunyi >5 menit (proses kemungkinan mati)' : ''],JSON_UNESCAPED_UNICODE);
+        exit;
     }$baseEndpointS = rtrim(trim($config['AI_ENDPOINT']?? 'http://127.0.0.1:20128/v1/chat/completions'),'/');
     $baseApiS = preg_replace('#/chat/completions$#','',$baseEndpointS);
     if($baseApiS === $baseEndpointS)$baseApiS = preg_replace('#/responses$#','',$baseEndpointS);
@@ -765,6 +787,11 @@ if($P && in_array(($P['mode']?? 'chat'),['native','chat','opencode-cli'],true)) 
     $cliKa = trim((string)($_POST['ka_id']?? ''));
     if($cliKa === '')$cliKa = 'ka'.date('YmdHis').substr(md5((string)microtime(true)),0,6);
     emit(['type' => 'run_started','run_id' => 'local_'.$cliKa,'ka_id' => $cliKa]);
+    $GLOBALS['_sse_spool'] = sse_spool_path('local_'.$cliKa);
+    $GLOBALS['_spool_buf'] = '';
+    $GLOBALS['_spool_usage'] = null;
+    $GLOBALS['_spool_flush'] = 0;
+    sse_spool_flush('running');
     emit(['type' => 'status','phase' => 'thinking']);
     if($routing !== 'fixed') {
         $chainNames = [];
@@ -837,12 +864,32 @@ if(function_exists('apache_setenv')) {
     @ ob_end_flush();
 }flush();
 set_time_limit(0);
+function sse_spool_path(string $runId): string {
+    return sys_get_temp_dir().'/c0n73xt_spool_'.md5($runId).'.json';
+}
+function sse_spool_flush(string $status): void {
+    $sp = (string)($GLOBALS['_sse_spool'] ?? '');
+    if($sp === '')return;
+    $GLOBALS['_spool_flush'] = time();
+    @file_put_contents($sp,json_encode(['status' => $status,'output' => (string)($GLOBALS['_spool_buf'] ?? ''),'usage' => $GLOBALS['_spool_usage'] ?? null,'updated' => time()],JSON_UNESCAPED_UNICODE),LOCK_EX);
+}
 function emit($obj) {
     echo 'data: '.json_encode($obj,JSON_UNESCAPED_UNICODE)."\n\n";
     if(function_exists('ob_flush'))@ob_flush();
     flush();
+    $GLOBALS['_last_emit'] = time();
+    if(!empty($GLOBALS['_sse_spool'])) {
+        $d = $obj['choices'][0]['delta']['content'] ?? '';
+        if(is_string($d) && $d !== '') {
+            $GLOBALS['_spool_buf'] = ($GLOBALS['_spool_buf'] ?? '').$d;
+            if(strlen($GLOBALS['_spool_buf']) > 500000)$GLOBALS['_spool_buf'] = substr($GLOBALS['_spool_buf'],0,500000);
+        }
+        if(($obj['type'] ?? '') === 'usage')$GLOBALS['_spool_usage'] = $obj;
+        if(time() - (int)($GLOBALS['_spool_flush'] ?? 0) >= 2)sse_spool_flush('running');
+    }
 }
 function emitDone() {
+    if(!empty($GLOBALS['_sse_spool']))sse_spool_flush('completed');
     echo "data: [DONE]\n\n";
     if(function_exists('ob_flush'))@ob_flush();
     flush();

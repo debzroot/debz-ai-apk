@@ -1385,7 +1385,13 @@
     }
 
     function actStreamEnd(stream) {
-        if (stream && stream.actLive) actLive(stream, false);
+        if (stream) stream.actLive = false;
+        if (actLiveCount > 0) { actLiveCount = 0; actSetLive(false); }
+        if (actPane) actPane.hidden = true;
+        if (actPaneToggleBtn) actPaneToggleBtn.classList.remove('on');
+        if (actPaneDotEl) actPaneDotEl.classList.remove('live');
+        if (actPaneMetaEl) actPaneMetaEl.textContent = 'idle';
+        actPaneHiddenByUser = false;
         actPaneSync(stream);
     }
 
@@ -1454,7 +1460,7 @@
         for (i = 0; i < lines.length; i++) {
             h += '<span class="frow"><span class="fno">' + (i + 1) + '</span><span class="ftx">' + escapeHTML(lines[i]) + '</span></span>';
         }
-        if (String(item.text || '').split('\n').length > MAX) h += '<span class="act-diff-more">… dipotong, full di drawer A_</span>';
+        if (String(item.text || '').split('\n').length > MAX) h += '<span class="act-diff-more">… dipotong, full di chat</span>';
         return '<div class="act-flow">' + h + '</div>';
     }
 
@@ -2685,10 +2691,11 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                         showProgress('⏳', 'Masih kerja · ' + idleS + 's tanpa update (koneksi hidup)');
                     }
                     // Sunyi >120s padahal server harusnya kirim heartbeat/10s
-                    // = koneksi mati suri. Kalau ada run_id (gateway), putus
-                    // paksa biar jatuh ke resume otomatis. Jalur CLI (tanpa
-                    // run_id) JANGAN di-abort — backend ikut mati.
-                    if (idleS >= 120 && currentStreamRunId) {
+                    // = koneksi mati suri. Gateway (run_id real): putus paksa
+                    // biar jatuh ke resume otomatis. Jalur CLI (local_: backend
+                    // tetap kerja + spool jalan) JANGAN di-abort — biarin
+                    // reader nutup sendiri lalu resume via run_status lokal.
+                    if (idleS >= 120 && currentStreamRunId && currentStreamRunId.indexOf('local_') !== 0) {
                         clearInterval(idleTimer);
                         try { abortController.abort(); } catch(e) {}
                     }
@@ -2723,7 +2730,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                             }
 
                             if (parsed.type === 'run_started') {
-                                if (parsed.run_id && parsed.run_id.indexOf('local_') !== 0) currentStreamRunId = parsed.run_id;
+                                if (parsed.run_id) currentStreamRunId = parsed.run_id;
                                 myStream.runId = currentStreamRunId;
                                 continue;
                             }
@@ -2751,7 +2758,7 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                                 continue;
                             }
                             if (parsed.type === 'status') {
-                                if (parsed.phase === 'thinking') showProgress('🧠', 'Mikir' + (parsed.iter ? ' · iter ' + parsed.iter : ''));
+                                if (parsed.phase === 'thinking') showProgress('🧠', 'Mikir' + (parsed.iter ? ' · iter ' + parsed.iter : '') + (parsed.wait_s ? ' · ' + parsed.wait_s + 's' : ''));
                                 else if (parsed.phase === 'writing') showProgress('✍️', 'Nulis');
                                 continue;
                             }

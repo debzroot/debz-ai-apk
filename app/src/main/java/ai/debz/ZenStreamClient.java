@@ -248,7 +248,13 @@ public final class ZenStreamClient {
                     }
                     String t = raw.trim();
                     if (t.isEmpty()) continue;
-                    if (t.equals(": ka")) continue;
+                    // Heartbeat diterusin (bukan di-drop): JS update lastByteTs
+                    // tiap reader.read() resolve, jadi idle watchdog tau koneksi
+                    // hidup. Tanpa ini stream local_ dikira mati suri >120s.
+                    if (t.equals(": ka")) {
+                        post(web, "window.__zenNativeOnEvent(" + q(key) + "," + q(raw) + ");");
+                        continue;
+                    }
                     if (t.contains("[DONE]")) cleanDone = true;
                     post(web, "window.__zenNativeOnEvent(" + q(key) + "," + q(raw) + ");");
                     if (cleanDone) break;
