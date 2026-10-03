@@ -95,6 +95,15 @@ if(isset($_GET['action'])&& $_GET['action']=== 'ka') {
         exit;
     }$f = sys_get_temp_dir().'/c0n73xt_ka_'.md5($rid);
     @ touch($f);
+    $nowKa = time();
+    $nKa = 0;
+    foreach((array)@glob(sys_get_temp_dir().'/c0n73xt_ka_*') as $oldKa) {
+        if($nKa >= 100)break;
+        if(@filemtime($oldKa) < $nowKa - 3600) {
+            @unlink($oldKa);
+            $nKa++;
+        }
+    }
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -586,6 +595,9 @@ if(isset($_GET['action'])&& $_GET['action']=== 'run_status') {
         $sf = sse_spool_path($rid);
         foreach((array)@glob(sys_get_temp_dir().'/c0n73xt_spool_*.json') as $oldSp) {
             if(@filemtime($oldSp) < time() - 7200)@unlink($oldSp);
+        }
+        foreach((array)@glob(sys_get_temp_dir().'/c0n73xt_ka_*') as $oldKa) {
+            if(@filemtime($oldKa) < time() - 3600)@unlink($oldKa);
         }
         if(!is_file($sf)) {
             http_response_code(404);

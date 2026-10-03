@@ -26,6 +26,7 @@ http {
             # stream kepotong tengah jalan -> frontend "Maaf, Gak ada balesan".
             fastcgi_read_timeout 3600;
             fastcgi_send_timeout 3600;
+            fastcgi_keep_conn on;
             fastcgi_buffering off;
         }
     }
