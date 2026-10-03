@@ -1,3 +1,9 @@
+---
+name: webui-theme-and-stream-abort-patch
+description: "Patch WebUI dark mode toggle stop button dan new chat saat streaming."
+version: "1.0.0"
+---
+
 # WebUI Patch: Dark Mode Toggle + Stop Button + New Chat Saat Streaming
 
 Prosedur reusable untuk project `~/debz-ai/` (webui `index.php` + `c0n73xt.css` + `c0n73xt.js`).

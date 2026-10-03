@@ -1,3 +1,9 @@
+---
+name: fix-php-admin-loader-stuck
+description: "Fix halaman admin PHP stuck di site-loader loading selamanya."
+version: "1.0.0"
+---
+
 # Fix: Halaman Admin PHP Stuck di "site-loader" / Loading Selamanya
 
 ## Gejala

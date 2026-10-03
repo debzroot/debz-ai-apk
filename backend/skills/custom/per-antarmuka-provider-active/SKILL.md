@@ -1,3 +1,9 @@
+---
+name: per-antarmuka-provider-active
+description: "Sinkron multi-UI provider aktif per-antarmuka CLI vs WebUI tanpa saling geser."
+version: "1.0.0"
+---
+
 # Per-Antarmuka Active Provider (Multi-UI Sync)
 
 ## Konteks

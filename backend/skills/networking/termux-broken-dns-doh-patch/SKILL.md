@@ -1,3 +1,9 @@
+---
+name: termux-broken-dns-doh-patch
+description: "Patch DNS broken Termux bionic resolver dengan DoH."
+version: "1.0.0"
+---
+
 # Fix DNS Broken di Termux (bionic resolver gaierror) — DoH Patch
 
 ## Gejala

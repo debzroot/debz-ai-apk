@@ -1,3 +1,9 @@
+---
+name: termux-dns-resolver-fix
+description: "Fix DNS resolver Termux gagal getaddrinfo errno 7."
+version: "1.0.0"
+---
+
 # Fix DNS Resolver Gagal di Termux (getaddrinfo gaierror Errno 7)
 
 ## Gejala

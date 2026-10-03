@@ -1,3 +1,9 @@
+---
+name: php-sqlite-storefront
+description: "Bangun sample toko online PHP SQLite dengan admin dashboard."
+version: "1.0.0"
+---
+
 # PHP + SQLite Storefront & Admin Dashboard (Sample Toko Online)
 
 Prosedur reusable untuk membangun sample toko online di `~/Linux_server/var/www/localhost/htdocs/<nama>/` yang langsung serve via nginx + php-fpm dan bisa diakses publik via cloudflared (contoh: `https://debz.online/<nama>/`).

@@ -1,3 +1,9 @@
+---
+name: webui-multisession-parallel-stream
+description: "Stream background paralel multi-sesi per session WebUI."
+version: "1.0.0"
+---
+
 # WebUI Multi-Sesi Paralel (Stream Background per Session)
 
 Prosedur reusable untuk `~/debz-ai/c0n73xt.js` — membuat stream AI jalan di background per-session, sehingga user bisa pindah chat / buka chat baru tanpa mem-pause stream lama.

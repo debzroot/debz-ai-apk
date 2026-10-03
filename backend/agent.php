@@ -196,6 +196,38 @@ function native_idem_begin(string $userText,array $messagesIn) {
     }
     return['hash' => $hash];
 }
+function native_retry_classify(string $err,array $r = []): array {
+    $e = strtolower($err);
+    $rate = str_contains($e,'http 429') || str_contains($e,'rate limit') || str_contains($e,'quota');
+    $auth = str_contains($e,'http 401') || str_contains($e,'http 403') || str_contains($e,'invalid api key') || str_contains($e,'unauthorized');
+    $bad = str_contains($e,'http 400') && ($r['content']?? '') === '' && ($r['reasoning']?? '') === '';
+    $malformed = str_contains($e,'blackhole') || str_contains($e,'response kosong') || str_contains($e,'tidak valid') || (!empty($r['invalid_sse']) && (int)$r['invalid_sse'] > 5);
+    $transient = $rate || $malformed || str_starts_with($e,'curl error') || preg_match('/\bhttp\s+5\d\d\b/',$e) === 1 || str_contains($e,'http 408') || str_contains($e,'timeout') || str_contains($e,'timed out') || str_contains($e,'temporar') || str_contains($e,'empty reply') || str_contains($e,'connection reset') || str_contains($e,'connection refused') || str_contains($e,'network is unreachable') || str_contains($e,'broken pipe') || str_contains($e,'unexpected eof');
+    return ['retryable' => (bool)$transient && !$auth, 'rate' => $rate, 'auth' => $auth, 'bad' => $bad, 'malformed' => $malformed, 'stall' => !empty($r['stall'])];
+}
+function native_retry_backoff(int $attempt,bool $isRate): int {
+    $base = min(1000 * (2 ** max(0,$attempt - 1)),12000);
+    if($isRate) $base = min(max($base,15000),30000);
+    return $base + random_int(0,min(1000,$base / 4));
+}
+function native_retry_state_path(string $key): string {
+    $k = preg_replace('/[^A-Za-z0-9_-]/','',substr($key,0,64));
+    if($k === '') $k = 'default';
+    return (function_exists('sys_get_temp_dir') ? sys_get_temp_dir() : '/tmp').'/debz_retry_'.$k.'.json';
+}
+function native_retry_state_save(string $key,array $st): void {
+    @file_put_contents(native_retry_state_path($key),json_encode(['ts' => time()] + $st,JSON_UNESCAPED_UNICODE),LOCK_EX);
+}
+function native_retry_state_load(string $key,int $maxAge = 1800): array {
+    $f = native_retry_state_path($key);
+    if(!is_file($f)) return [];
+    if(time() - (int)@filemtime($f) > $maxAge) return [];
+    $j = json_decode((string)@file_get_contents($f),true);
+    return is_array($j) ? $j : [];
+}
+function native_retry_state_clear(string $key): void {
+    @unlink(native_retry_state_path($key));
+}
 function native_chat_once(string $baseUrl,string $apiKey,string $model,array $messages,array $tools,int $maxTokens,array $opts = []): array {
     $attempt = 0;
     $stripRD = ! empty($opts['strip_reasoning_details']);
@@ -234,12 +266,16 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
             return $r;
         }
         $errTxt = (string)$r['error'];
-        $isTransient = (stripos($errTxt,'cURL error')=== 0 || preg_match('/\bHTTP\s+5\d\d\b/i',$errTxt)|| stripos($errTxt,'HTTP 408')!== false || stripos($errTxt,'HTTP 429')!== false || stripos($errTxt,'timeout')!== false || stripos($errTxt,'timed out')!== false || stripos($errTxt,'temporar')!== false || stripos($errTxt,'Blackhole: stream')!== false);
+        $cls = native_retry_classify($errTxt,$r);
+        $isTransient = $cls['retryable'];
         $is5xxViaProxy = preg_match('/\bHTTP\s+5\d\d\b/i',$errTxt)=== 1 && ! empty($GLOBALS['_debz_last_proxy']);
-        $isProxyError = stripos($errTxt,'cURL error')=== 0 || stripos($errTxt,'timeout')!== false || stripos($errTxt,'timed out')!== false || stripos($errTxt,'HTTP 407')!== false || stripos($errTxt,'Failed to connect')!== false || stripos($errTxt,'Could not connect')!== false || stripos($errTxt,'Proxy CONNECT aborted')!== false || stripos($errTxt,'empty reply from server')!== false || stripos($errTxt,'Connection reset')!== false || stripos($errTxt,'Connection refused')!== false || stripos($errTxt,'Network is unreachable')!== false || stripos($errTxt,'Broken pipe')!== false || stripos($errTxt,'unexpected eof')!== false || stripos($errTxt,'Blackhole: stream')!== false || ! empty($is5xxViaProxy);
-        $isSSLError = (stripos($errTxt,'cURL error')=== 0)&&(stripos($errTxt,'SSL')!== false || stripos($errTxt,'ssl')!== false || stripos($errTxt,'certificate')!== false || stripos($errTxt,'handshake')!== false)&& stripos($errTxt,'unexpected eof')=== false;
-        $isRateLimit = stripos($errTxt,'HTTP 429')!== false;
-        $isStall = ! empty($r['stall']);
+        $isProxyError = $isTransient;
+        $isSSLError = (stripos($errTxt,'cURL error')=== 0)&&(stripos($errTxt,'SSL')!== false || stripos($errTxt,'certificate')!== false || stripos($errTxt,'handshake')!== false)&& stripos($errTxt,'unexpected eof')=== false;
+        if($isSSLError) $isTransient = false;
+        if($cls['auth']) $isTransient = false;
+        $isRateLimit = $cls['rate'];
+        $isStall = $cls['stall'];
+        $t0retry = microtime(true);
         if(! $isTransient || $attempt >= $maxRetry) {
             if($resumeOn && ($keptContent !== '' || $keptReasoning !== '')) {
                 $r['content'] = native_dedup_append($keptContent,(string)$r['content']);
@@ -290,15 +326,12 @@ function native_chat_once(string $baseUrl,string $apiKey,string $model,array $me
             $r['reasoning']= '';
             $r['toolCalls']= [];
         }$attempt ++;
-        $backoff = min(1000 *(2 ** max(0,$attempt - 1)),12000);
-        if($isRateLimit)$backoff = min(max($backoff,15000),30000);
-        if($isRateLimit) {
-            $GLOBALS['_debz_direct_429_until']= time()+ 600;
-        }
-        // PROXY-FREE: retry selalu direct, tanpa rotasi proxy.
+        $backoff = native_retry_backoff($attempt,$isRateLimit);
+        if($isRateLimit) $GLOBALS['_debz_direct_429_until']= time()+ 600;
         $opts['_proxyFail']= false;
         $opts['_useProxy']= true;
-        termEmit('retry'," ⏳ Retry # $attempt / $maxRetry  dalam  ".($backoff / 1000)."s...");
+        if(function_exists('applog')) applog('NET','retry_wait',['n' => $attempt,'max' => $maxRetry,'ms' => $backoff,'kind' => $cls['malformed'] ? 'malformed' : ($isStall ? 'stall' : ($isRateLimit ? 'rate' : 'transient')),'elapsed_ms' => (int)((microtime(true) - $t0retry) * 1000)]);
+        termEmit('retry'," ⏳ Retry # $attempt / $maxRetry dalam ".round($backoff / 1000,1)."s...");
         native_sleep_heartbeat($backoff);
     }
 }
@@ -470,7 +503,12 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
     // socket mati yg menggantung.
     curl_setopt($ch,CURLOPT_TIMEOUT,max(300,native_config_int('AI_PROXY_CURL_TIMEOUT',1800)));
     curl_setopt($ch,CURLOPT_LOW_SPEED_LIMIT,1);
-    curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,max(60,native_config_int('AI_PROXY_LOWSPEED_S',90)));$ok = curl_exec($ch);
+    // WHY: reasoning/thinking sunyi 90-150 dtk = normal, LOW_SPEED 90s = false stall bunuh stream sehat.
+    $lsBase = max(60,native_config_int('AI_PROXY_LOWSPEED_S',90));
+    $lsProbe = '';
+    foreach(array_slice($messages, -3) as $mLs) { if(is_array($mLs) && ($mLs['role']??'')==='user') $lsProbe .= ' '.(string)($mLs['content']??''); }
+    if(function_exists('debz_is_long_job') && debz_is_long_job($lsProbe)) $lsBase = max(180,$lsBase);
+    curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,$lsBase);$ok = curl_exec($ch);
     $errno = curl_errno($ch);
     $error = curl_error($ch);
     $httpCode = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
@@ -633,6 +671,12 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
         if($dynRules !== '')$chatMessages[]= ['role' => 'system','content' => $dynRules];
         $chatMessages[]= ['role' => 'user','content' => $userText];
     }$chatMessages = native_context_cap($chatMessages);
+    $retryKey = preg_replace('/[^A-Za-z0-9_-]/','',substr((string)($_POST['thread_id'] ?? $_POST['ka_id'] ?? $_POST['message_id'] ?? md5($userText)),0,40));
+    $recovered = $retryKey !== '' ? native_retry_state_load($retryKey) : [];
+    if(!empty($recovered['msgs']) && stripos(trim($userText),'lanjut') === 0 && count($chatMessages) < 4) {
+        $chatMessages = array_merge($chatMessages,(array)$recovered['msgs']);
+        termEmit('info','♻️ Recovery: lanjut dari checkpoint iter '.$recovered['iter']);
+    }
     $tools = $toolsOn? native_tool_definitions():[];
     $MAX_ITER = max(1,native_config_int("AI_MAX_ITER",128));
     $MAX_REPEAT = max(2,native_config_int('AI_MAX_REPEAT',4));
@@ -784,6 +828,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
                 termEmit('ok','Tugas Selesai ✨ · '.($iter + 1).' iterasi · '.$totalUsage['total_tokens'].' tokens');
                 if($totalUsage['total_tokens']> 0 && function_exists('emit'))emit(['type' => 'usage']+ $totalUsage);
                 native_rag_capture($userText,$finalContent);
+                if($retryKey !== '') native_retry_state_clear($retryKey);
                 native_idem_release();if(function_exists('emitDone'))emitDone();
                 return;
             }
@@ -885,6 +930,7 @@ function native_agent_run(array $P,array $messagesIn,int $maxTokens,string $user
             if($toolContent === false)$toolContent = json_encode(['error' => 'Tool output JSON encode gagal']);
             $chatMessages[]= ['role' => 'tool','tool_call_id' => $callId,'content' => $toolContent];
         }
+        if($retryKey !== '') native_retry_state_save($retryKey,['iter' => $iter + 1,'msgs' => array_slice($chatMessages,-6),'final' => substr($finalContent,0,2000)]);
         if($iter > 0 && $iter % 3 === 0) {
             $chatMessages[]= ['role' => 'system','content' => 'REMINDER: Fokus pada penyelesaian tugas. Jangan berhalusinasi atau mencetak tag internal. Output jawaban final jika tugas sudah selesai, atau panggil tool dengan format yang benar.'];
         }
@@ -1318,6 +1364,32 @@ function oc_need_rotate_by_tokens(string $threadId): string {
     if($tt >= 200000)return 'total ≈'.number_format($tt).' tokens';
     return '';
 }
+function oc_task_manifest_path(string $threadId): string {
+    return (function_exists('sys_get_temp_dir')?sys_get_temp_dir():'/tmp').'/debz_task_'.md5($threadId).'.json';
+}
+function oc_task_write(string $threadId,string $session,string $model,string $prompt): void {
+    if($threadId==='')return;
+
+    $dest = oc_task_manifest_path($threadId);
+    $tmp = @tempnam(function_exists('sys_get_temp_dir')?sys_get_temp_dir():'/tmp','debz_task_');
+    if(!is_string($tmp)||$tmp==='')return;
+    $ok = @file_put_contents($tmp,json_encode(['thread'=>$threadId,'session'=>$session,'model'=>$model,'prompt'=>mb_substr($prompt,0,800),'started'=>date('c'),'status'=>'running'],JSON_UNESCAPED_UNICODE),LOCK_EX);
+    if($ok===false){@unlink($tmp);return;}
+    if(!@rename($tmp,$dest))@unlink($tmp);
+}
+function oc_task_clear(string $threadId): void {
+    if($threadId==='')return;
+    @unlink(oc_task_manifest_path($threadId));
+}
+function oc_task_read(string $threadId): array {
+    if($threadId==='')return [];
+    $f = oc_task_manifest_path($threadId);
+    if(!is_file($f))return [];
+    if(time()-(int)@filemtime($f) > 86400){@unlink($f);return [];}
+    $j = json_decode((string)@file_get_contents($f),true);
+    if(!is_array($j)){@unlink($f);return [];}
+    return $j;
+}
 function oc_resume_cmd(string $threadId,int $turns): string {
     $short = substr($threadId,0,8);
     return 'Lanjutin dari sesi '.$short.' ('.$turns.' pesan): baca HANDOFF terakhir + git status + git diff --stat dulu, terus kerjain sisa TODO tanpa ngulang yang udah beres.';
@@ -1328,9 +1400,6 @@ function oc_emit_handoff(string $threadId,int $turns,string $reason,string $type
     if(function_exists('termEmit'))termEmit('warn','🧬 Sesi '.$turns.'x chat ('.$reason.') — auto-handoff jaga biar awet.');
 }
 function oc_auto_handoff_summary(array $P,array $messagesIn): string {
-    // Bawa konteks terakhir sebagai teks (tanpa LLM tambahan): endpoint HTTP
-    // zen geo-block dari HP (403), jadi ringkasan LLM tak bisa diandalkan.
-    // Rotasi tetap nyambung via 4 pesan terakhir @500 chars (compact, anti-jebol).
     $take = array_slice($messagesIn,-4);
     $lines = [];
     foreach($take as $mH) {
@@ -1340,8 +1409,25 @@ function oc_auto_handoff_summary(array $P,array $messagesIn): string {
         if($cH === '')continue;
         $lines[]= $rH.': '.mb_substr(preg_replace('/\s+/',' ',$cH),0,500);
     }
-    if(! $lines)return '';
-    return "Konteks sesi sebelumnya (sesi CLI di-fresh-kan, lanjutkan tanpa ngulang):\n".implode("\n",$lines)."\nBaca git status + git diff --stat dulu bila relevan, terus kerjain sisa TODO.";
+    // WHY: fresh session = amnesia kalau cuma bawa 4 pesan; bridge dari manifest + autosave.
+    $bridge = '';
+    $tidBridge = (string)($_POST['thread_id']??$_POST['ka_id']??'');
+    if($tidBridge!=='') {
+        $tm = function_exists('oc_task_read')?oc_task_read($tidBridge):[];
+        if(!empty($tm['prompt'])) $bridge .= "\nTASK-AKTIF: ".mb_substr((string)$tm['prompt'],0,300)." (sesi ".substr((string)($tm['session']??''),0,12).", mulai ".(string)($tm['started']??'-').")";
+        $asF = __DIR__.'/sessions/autosave.json';
+        if(is_file($asF)) {
+            $asJ = json_decode((string)@file_get_contents($asF),true);
+            $hist = is_array($asJ)?($asJ['history']??$asJ):[];
+            if(is_array($hist)&&count($hist)>0) {
+                $last = end($hist);
+                $c = is_array($last)?trim(strip_tags((string)($last['content']??''))):trim((string)$last);
+                if($c!=='') $bridge .= "\nAUTOSAVE: ".mb_substr(preg_replace('/\s+/',' ',$c),0,300);
+            }
+        }
+    }
+    if(!$lines && $bridge==='')return '';
+    return "Konteks sesi sebelumnya (sesi CLI di-fresh-kan, lanjutkan tanpa ngulang):\n".implode("\n",$lines).$bridge."\nBaca git status + git diff --stat dulu bila relevan, terus kerjain sisa TODO.";
 }
 function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens,string $userText,string $threadId = '',bool $toolsOn = true,bool $allowSessionIn = false,array $attachFiles = []): void {
     @ set_time_limit(0);
@@ -1500,6 +1586,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             }
         }$cmd[]= '--';
         $cmd[]= $userText;
+        if(function_exists('oc_task_write')) oc_task_write($threadId,$openSession,$model,$userText);
         $spec = [0 =>['pipe','r'],1 =>['pipe','w'],2 =>['pipe','w']];
         $pipes = [];
         $proc = @ proc_open($cmd,$spec,$pipes,null,$env);
@@ -1744,9 +1831,11 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             // LONG-JOB sunyi 5-30 mnt bukan hang — limit ikut $stallLim.
             if($cliProxy === '' && ! $cliProxyHang &&(time()- $lastProgressTs)> $stallLim) {
                 $cliProxyHang = true;
-                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode hang** (".$stallLim." detik tanpa progres) — proses dihentikan. Konteks sesi aman, ketik `lanjut` untuk meneruskan.\n"]]]]);
-                if(function_exists('termEmit'))termEmit('error','Direct mode diam ('.$stallLim.' detik tanpa progres), proses dihentikan.');
-                if(function_exists('applog'))applog('OPENCODE_CLI','direct_stall',['stall' => time()- $lastProgressTs,'lim' => $stallLim,'long' => $isLong ? 1 : 0]);
+                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode hang** (".$stallLim." detik tanpa progres) — proses dihentikan. Sesi dipertahankan (IDLE/AWAITING), ketik `lanjut` untuk meneruskan.\n"]]]]);
+                if(function_exists('emit'))emit(['type' => 'status','phase' => 'awaiting','wait_s' => (int)(time()-$lastProgressTs)]);
+                if(function_exists('termEmit'))termEmit('error','Direct mode diam ('.$stallLim.' detik tanpa progres), sesi dipertahankan.');
+                // WHY: map session jangan dihapus saat stall — hapus = fragmentasi + amnesia.
+                if(function_exists('applog'))applog('OPENCODE_CLI','direct_stall',['stall' => time()- $lastProgressTs,'lim' => $stallLim,'long' => $isLong ? 1 : 0,'session_kept' => $capsSession!==''?substr($capsSession,0,12):($openSession!==''?substr($openSession,0,12):'-')]);
                 @ proc_terminate($proc,9);
                 $cliTimedOut = true;
                 break;
@@ -1803,6 +1892,8 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if($mapFile !== '' && $capsSession !== '') {
             @ file_put_contents($mapFile,json_encode(['sessionID' => $capsSession,'updated' => date('c'),'model' => $model]),LOCK_EX);
         }
+        // WHY: manifest bersih cuma saat sukses; stall/timeout = biarkan buat resume `lanjut`.
+        if($sawContent && !$cliTimedOut && function_exists('oc_task_clear')) oc_task_clear($threadId);
         $effMaxTry = $maxProxyTry;
         if($stepInMax >= 250000) {
             $effMaxTry = max(2,(int)round($maxProxyTry * 300000 / $stepInMax));
@@ -2082,16 +2173,32 @@ function native_summarize_dropped(array $dropped): string {
     if(strlen($summary)< 10)return '';
     $key = 'ctx-'.substr(hash('sha256',$summary),0,12);
     native_note_upsert($key,$summary);
+    native_maybe_summarize_bg();
     return $summary;
 }
 function native_note_upsert(string $key,string $content): void {
     try {
         $db = new PDO('sqlite:'.__DIR__.'/notes.db');
         $db->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
+        $db->exec("CREATE TABLE IF NOT EXISTS notes (key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)");
         $st = $db->prepare("INSERT INTO notes (key, content, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET content = excluded.content, updated_at = datetime('now')");
         $st->execute([$key,$content]);
     }catch(Throwable $e) {
     }
+}
+function native_maybe_summarize_bg(): void {
+    if(native_config_int('AI_SUMMARIZE_ON',1) !== 1) return;
+    $thr = max(10,native_config_int('AI_SUMMARIZE_THRESHOLD_KB',50)) * 1024;
+    $big = false;
+    foreach([__DIR__.'/notes.db',__DIR__.'/sessions/autosave.json'] as $f) {
+        if(is_file($f) && @filesize($f) > $thr) { $big = true; break; }
+    }
+    if(!$big) return;
+    $mark = sys_get_temp_dir().'/debz_summarizer.lock';
+    if(is_file($mark) && time() - (int)@filemtime($mark) < 600) return;
+    @touch($mark);
+    $py = escapeshellarg(__DIR__.'/scripts/summarizer.py');
+    @exec('nohup python3 '.$py.' >/dev/null 2>&1 &');
 }
 function native_strike_key(string $toolName,array $args): string {
     $norm = json_encode($args,JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

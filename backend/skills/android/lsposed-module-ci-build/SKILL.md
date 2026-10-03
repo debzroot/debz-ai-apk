@@ -1,3 +1,10 @@
+---
+name: lsposed-module-ci-build
+description: "Build LSPosed/Xposed APK via GitHub Actions x86_64 CI: XposedBridgeApi bundle, Kotlin hook gotchas, release via tag."
+version: "1.0.0"
+tags: [lsposed, xposed, android, apk, github-actions, ci, kotlin, whatsapp]
+---
+
 # LSPosed Module — Build APK via GitHub Actions (x86_64 CI)
 
 ## Konteks

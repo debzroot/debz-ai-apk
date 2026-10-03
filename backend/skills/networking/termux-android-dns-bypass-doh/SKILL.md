@@ -1,3 +1,9 @@
+---
+name: termux-android-dns-bypass-doh
+description: "Fix DNS rusak Termux Android via bypass DoH."
+version: "1.0.0"
+---
+
 # Fix DNS Rusak di Termux/Android (Bypass via DoH)
 
 ## Gejala

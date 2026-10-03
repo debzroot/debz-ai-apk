@@ -1100,7 +1100,7 @@ def _term_signal_handler(signum, frame):
     _arm_exit_watchdog()
     raise KeyboardInterrupt()
 
-for _sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+for _sig in (signal.SIGINT, signal.SIGTERM, getattr(signal, "SIGHUP", None)):
     if _sig is not None:
         try: signal.signal(_sig, _term_signal_handler)
         except Exception: pass
@@ -3097,7 +3097,7 @@ class Agent:
             env["XDG_DATA_HOME"] = os.path.join(PROJECT_ROOT, "opencode-bin", ".data_home")
             # LONG-JOB vs CHAT: build/CI/download sunyi 5-30 mnt BUKAN hang.
             _is_long = _is_long_job(prompt)
-            stall_lim = 1800 if _is_long else (120 if fast else 900)
+            stall_lim = 1800 if _is_long else 900
 
             import json as _json
             import socket as _sock
@@ -3570,8 +3570,9 @@ class Agent:
 
                 if fail:
                     stalls += 1
-                    _stall_long = "direct stall" in (et or "").lower() and _is_long_job(user_msg)
-                    if not _stall_long:
+                    _etl_f = (et or "").lower()
+                    _keep_sess = ("direct stall" in _etl_f or "cli timeout" in _etl_f or _is_long_job(user_msg))
+                    if not _keep_sess:
                         self._oc_session = ""
                     if attempt < 3:
                         _msg_proxy(f"coba lagi ({attempt + 1}/4)…", icon="🔄", color="yellow")

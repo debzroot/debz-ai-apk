@@ -1,3 +1,9 @@
+---
+name: llm-rate-limit-smart-retry
+description: "Smart retry LLM API untuk 429 dan 503 dengan backoff adaptif."
+version: "1.0.0"
+---
+
 # SKILL: Smart Rate Limit & Retry untuk LLM API (429/503)
 
 ## Kapan dipakai

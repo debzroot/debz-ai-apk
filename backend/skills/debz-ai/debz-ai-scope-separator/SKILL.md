@@ -1,3 +1,9 @@
+---
+name: debz-ai-scope-separator
+description: "Pisah scope provider aktif CLI vs WebUI dengan sinkron proxy."
+version: "1.0.0"
+---
+
 # Scope-Aware Active Provider — Debz AI (CLI vs WebUI beda aktif)
 
 ## Kapan dipakai
