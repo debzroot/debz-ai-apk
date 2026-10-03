@@ -1022,7 +1022,7 @@ if(! $hasImages && $userMessage !== '') {
         $textStarted = false;
         $approvalPendingSince = 0;
         $runStartedAt = time();
-        ignore_user_abort(false);
+        @ignore_user_abort(true);
         function clientIsGone() {
             global $kaFile;
             if($kaFile !== null) {
@@ -1341,7 +1341,7 @@ function fallbackClientIsGone() {
     if($running > 0) {
         $sel = @ curl_multi_select($mh,1);
         if($sel === - 1)usleep(100000);
-    }ignore_user_abort(false);
+    }@ignore_user_abort(true);
     if(fallbackClientIsGone()) {
         finishFallbackStream($ch,$mh);
     }

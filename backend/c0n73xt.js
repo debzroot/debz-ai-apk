@@ -2666,6 +2666,13 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                                         resolve(true);
                                     } else if (s === 'waiting_for_approval') {
                                         if (mySessionId === activeSessionId) showProgress('⏳', 'Nunggu');
+                                    } else if (s === 'running' && st.output && st.output.length > fullContent.length) {
+                                        fullContent = st.output;
+                                        myStream.fullContent = fullContent;
+                                        if (mySessionId === activeSessionId) {
+                                            SR.flush(fullContent, rdItems);
+                                            showProgress('🔌', 'Resume... +' + fullContent.length + ' chars');
+                                        }
                                     } else if (attempts % 8 === 0) {
                                         if (mySessionId === activeSessionId) showProgress('🔌', 'Stream putus — nunggu agent kelar (resume otomatis)...');
                                     }
@@ -2873,6 +2880,24 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                 }
 
                 if (!fullContent && !doneReceived) fullContent = "⚠️ **Stream berhenti sebelum Done** — agent mungkin masih jalan (backend tahan 90 dtk grace, sesi aman di chat yang sama). Ketik `lanjut` untuk meneruskan, atau tekan Regen.";
+
+                // DONE keterima tapi chunk SSE sempat ilang di jalan (WebView/
+                // proxy buffer) = konten kepotong padahal spool backend lengkap.
+                // Verifikasi sekali ke spool lokal, pakai yang lebih panjang.
+                if (doneReceived && currentStreamRunId && currentStreamRunId.indexOf('local_') === 0) {
+                    try {
+                        var vr = await fetch(API_URL + '?action=run_status&run_id=' + encodeURIComponent(currentStreamRunId), { cache: 'no-store' });
+                        if (vr.ok) {
+                            var vst = await vr.json();
+                            var spoolOut = (vst && vst.output) || '';
+                            if (spoolOut.length > fullContent.length) {
+                                fullContent = spoolOut;
+                                myStream.fullContent = fullContent;
+                                if (mySessionId === activeSessionId) SR.flush(fullContent, rdItems);
+                            }
+                        }
+                    } catch(eV) {}
+                }
 
                 if (!fullContent && doneReceived) {
                     fullContent = "⚠️ Provider balikin jawaban kosong (kemungkinan model cuma ngerjain reasoning tanpa output).\n\nCoba kirim ulang pesan lu — kalau masih kayak gini, ganti model di ⚙️ Settings.";
