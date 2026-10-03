@@ -1523,6 +1523,8 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         $clientGone = false;
         $clientGoneAt = 0;
         $stepCount = 0;
+        $toolSeen = false;
+        $textAfterTool = false;
         $lastTextChunk = '';
         $textRepeat = 0;
         $textLoopCap = 4;
@@ -1595,6 +1597,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                         if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => $txt]]]]);
                         $sawContent = true;
                         $textEmitted = true;
+                        if($toolSeen)$textAfterTool = true;
                         $touchProgress();
                     }break;
                     case 'tool_use': $tool = (string)($part['tool']?? '');
@@ -1614,6 +1617,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                     $ocId = 'oc_'.$GLOBALS['_oc_tool_n'];
                     if(function_exists('emit'))emit(['type' => 'tool','phase' => 'start','id' => $ocId,'name' => $tool,'detail' => $detail]);
                     if(function_exists('emit'))emit(['type' => 'terminal','kind' => 'tool','line' => '🛠️ '.$toolDisp]);
+                    $toolSeen = true;
                     $touchProgress();
                     if($stStatus === 'completed' || $stStatus === 'error') {
                         $outRaw = $st['output']?? '';
@@ -1744,11 +1748,15 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             return;
         }$stdoutBuf .= (string)@ stream_get_contents($pipes[1]);
         if(trim($stdoutBuf)!== '') {
-            $ev = json_decode(trim($stdoutBuf),true);
-            if(is_array($ev)) {
+            foreach(preg_split('/\r?\n/',(string)$stdoutBuf) as $restLn) {
+                $restLn = trim((string)$restLn);
+                if($restLn === '')continue;
+                $ev = json_decode($restLn,true);
+                if(! is_array($ev))continue;
                 if(($ev['type']?? '')=== 'text' && ! empty($ev['part']['text'])&& function_exists('emit')) {
                     emit(['choices' =>[['delta' =>['content' => (string)$ev['part']['text']]]]]);
                     $sawContent = true;
+                    if($toolSeen)$textAfterTool = true;
                 }
                 if(($ev['type']?? '')=== 'step_finish' && isset($ev['part']['tokens'])&& is_array($ev['part']['tokens'])) {
                     $tk = $ev['part']['tokens'];
@@ -1762,6 +1770,7 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if($stderrLeft !== '')$stderrBuf .= $stderrLeft;
         fclose($pipes[2]);
         $exitCode = oc_proc_done($proc);
+        if(function_exists('applog'))applog('OPENCODE_CLI','exit',['exit' => $exitCode,'steps' => $stepCount,'saw_content' => $sawContent? 1: 0,'text_after_tool' => $textAfterTool? 1: 0,'in' => $usageIn,'out' => $usageOut,'total' => $usageTotal,'timeout' => $cliTimedOut? 1: 0,'loop' => $loopDetected? 1: 0,'gone' => $clientGone? 1: 0,'stderr' => substr(trim($stderrBuf),0,300)]);
         if($mapFile !== '' && $capsSession !== '') {
             @ file_put_contents($mapFile,json_encode(['sessionID' => $capsSession,'updated' => date('c'),'model' => $model]),LOCK_EX);
         }
@@ -1781,6 +1790,10 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         if(function_exists('oc_thread_note_usage'))oc_thread_note_usage($threadId,$stepInMax,$usageTotal);
         if($usageTotal > 0 && function_exists('emit')) {
             emit(['type' => 'usage','input_tokens' => $usageIn,'output_tokens' => $usageOut,'total_tokens' => $usageTotal]);
+        }
+        if($sawContent && ! $cliTimedOut && ! $loopDetected && ! $clientGone && $toolSeen && ! $textAfterTool) {
+            if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\nℹ️ **Agent berhenti setelah ".$stepCount." langkah tools tanpa jawaban akhir** (exit ".$exitCode."). Konteks aman — ketik `lanjut` untuk meneruskan.\n"]]]]);
+            if(function_exists('termEmit'))termEmit('warn','CLI exit tanpa teks final setelah tools (exit '.$exitCode.', '.$stepCount.' steps) — ketik lanjut.');
         }
         if(! $sawContent && ! $cliTimedOut) {
             $err = trim($stderrBuf);
