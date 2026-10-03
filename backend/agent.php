@@ -336,9 +336,30 @@ function native_chat_once_raw(string $baseUrl,string $apiKey,string $model,array
             $lineBuf = substr($lineBuf,$nl + 1);
             $processLine($line);
         }
+        // Forward heartbeat tiap chunk provider (biar SSE downstream hidup
+        // walau model ngirim token jarang — max 1x/5 dtk, ditahan via static).
+        static $lastChunkHb = 0;
+        $now = microtime(true);
+        if(($now - $lastChunkHb) >= 5) {
+            $lastChunkHb = $now;
+            if(function_exists('native_heartbeat'))native_heartbeat();
+        }
         return strlen($chunk);
     };
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 0,CURLOPT_LOW_SPEED_LIMIT => 10,CURLOPT_LOW_SPEED_TIME => 20,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write]);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => false,CURLOPT_POST => true,CURLOPT_HTTPHEADER => $chatHeaders,CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 12,CURLOPT_TIMEOUT => 0,CURLOPT_LOW_SPEED_LIMIT => 10,CURLOPT_LOW_SPEED_TIME => 20,CURLOPT_TCP_KEEPALIVE => 1,CURLOPT_TCP_KEEPIDLE => 10,CURLOPT_TCP_KEEPINTVL => 5,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,CURLOPT_ENCODING => "",CURLOPT_WRITEFUNCTION => $write,CURLOPT_NOPROGRESS => false,CURLOPT_PROGRESSFUNCTION => function($curl,$dlTotal,$dlNow,$ulTotal,$ulNow): int {
+        // Provider sunyi (mikir/reasoning 30-90 dtk, apalagi pas konteks
+        // web_search gede) = curl_exec() blocking tanpa byte -> SSE downstream
+        // mati suri -> WebView "BodyStreamBuffer was aborted". Progress callback
+        // dipanggil curl ~1x/dtk walau 0 byte, jadi tempat ideal buat : ka /5 dtk.
+        static $lastHb = 0;
+        $now = microtime(true);
+        if($lastHb === 0)$lastHb = $now;
+        if(($now - $lastHb) >= 5) {
+            $lastHb = $now;
+            if(function_exists('native_heartbeat'))native_heartbeat();
+        }
+        return 0;
+    }]);
     if(! empty($opts['_sslFallback'])) {
         if(function_exists('termEmit'))termEmit('info',"🔒 SSL verify disabled (fallback mode)");
     }$px = '';
@@ -1549,19 +1570,20 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                     default: break;
                 }
             }
-            // GRACE 90s: WebView/HP sering jeda sesaat (throttle/blip) hingga
+            // GRACE 180s: WebView/HP sering jeda sesaat (throttle/blip/Doze) hingga
             // connection_aborted()=1 padahal user masih nunggu. Jangan bunuh
             // opencode langsung — beri tenggang, tetap heartbeat, baru kill
-            // bila masih putus sehabis grace. Sesi serve tetap persisten.
+            // bila masih putus sehabis grace. Sesi serve tetap persisten,
+            // thread aman — ketik `lanjut` untuk meneruskan.
             if(function_exists('connection_aborted')&& @ connection_aborted()=== 1) {
                 if($clientGoneAt === 0) {
                     $clientGoneAt = time();
-                    if(function_exists('termEmit'))termEmit('warn','📡 Koneksi frontend kedip — agent tetap jalan 90 dtk (grace)...');
-                    if(function_exists('applog'))applog('OPENCODE_CLI','client_gone_grace',['grace' => 90]);
-                } elseif((time()- $clientGoneAt)>= 90) {
+                    if(function_exists('termEmit'))termEmit('warn','📡 Koneksi frontend kedip — agent tetap jalan 180 dtk (grace)...');
+                    if(function_exists('applog'))applog('OPENCODE_CLI','client_gone_grace',['grace' => 180]);
+                } elseif((time()- $clientGoneAt)>= 180) {
                     $clientGone = true;
                     @ proc_terminate($proc,9);
-                    if(function_exists('applog'))applog('OPENCODE_CLI','client_gone',['terminate' => true,'after_grace' => 90]);
+                    if(function_exists('applog'))applog('OPENCODE_CLI','client_gone',['terminate' => true,'after_grace' => 180]);
                     break;
                 }
             } else {
@@ -1576,10 +1598,13 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 $lastDataBeat = time();
                 if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking']);
             }
-            if($cliProxy === '' && ! $cliProxyHang &&(time()- $lastProgressTs)> 240) {
+            // STALL 900s: tool lama tanpa output (CI build/gradle 5-15 mnt sunyi)
+            // BUKAN hang — jangan bunuh. Sesi serve persisten, konteks aman.
+            // Frontend tetap dapat :ka/10s + thinking/45s biar tak dikira putus.
+            if($cliProxy === '' && ! $cliProxyHang &&(time()- $lastProgressTs)> 900) {
                 $cliProxyHang = true;
-                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode hang** (240 detik tanpa progres) — proses dihentikan, coba lagi.\n"]]]]);
-                if(function_exists('termEmit'))termEmit('error','Direct mode diam (240 detik tanpa progres), proses dihentikan.');
+                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode hang** (900 detik tanpa progres) — proses dihentikan. Konteks sesi aman, ketik `lanjut` untuk meneruskan.\n"]]]]);
+                if(function_exists('termEmit'))termEmit('error','Direct mode diam (900 detik tanpa progres), proses dihentikan.');
                 if(function_exists('applog'))applog('OPENCODE_CLI','direct_stall',['stall' => time()- $lastProgressTs]);
                 @ proc_terminate($proc,9);
                 $cliTimedOut = true;
@@ -1813,12 +1838,33 @@ function native_call_tool(string $endpoint,array $args,& $approvalInfo = null): 
         $ch = curl_init($base);
         if($ch === false)continue;
         curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER => true,CURLOPT_POST => true,CURLOPT_HTTPHEADER =>['Content-Type: application/json','Accept: application/json','Connection: keep-alive'],CURLOPT_POSTFIELDS => $encoded,CURLOPT_CONNECTTIMEOUT => 5,CURLOPT_TIMEOUT => 300,CURLOPT_SSL_VERIFYPEER => false,CURLOPT_SSL_VERIFYHOST => 0,CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1]);
-        $res = curl_exec($ch);
+        // Heartbeat selama tool blocking (web_search deep 30-60 dtk):
+        // curl_exec() biasa bikin SSE downstream mati suri -> WebView
+        // BodyStreamBuffer aborted. Pakai curl_multi + : ka /5 dtk.
+        $mh = curl_multi_init();
+        curl_multi_add_handle($mh,$ch);
+        $running = 0;
+        $lastHb = microtime(true);
+        do {
+            curl_multi_exec($mh,$running);
+            if($running > 0) {
+                $sel = @curl_multi_select($mh,1);
+                if($sel === -1)usleep(100000);
+            }
+            if((microtime(true) - $lastHb) >= 5) {
+                $lastHb = microtime(true);
+                if(function_exists('native_heartbeat'))native_heartbeat();
+            }
+        } while($running > 0);
+        $res = curl_multi_getcontent($ch);
         $http = (int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
         $err = curl_error($ch);
         $errno = curl_errno($ch);
+        curl_multi_remove_handle($mh,$ch);
+        curl_multi_close($mh);
         curl_close($ch);
-        if($res !== false) { $raw = $res; break; }
+        if($errno === 0 && $res !== false) { $raw = $res; break; }
+        $raw = false;
         if(! in_array($errno,[7,28],true)) { $raw = false; break; }
     }
     if($raw === false)return[false,['error' => 'tool server unreachable (ports '.implode(',',$tried).'): '.($err !== ''? $err: 'cURL errno '.$errno)]];

@@ -961,7 +961,11 @@ if(! $hasImages && $userMessage !== '') {
         // biar socket upstream beneran mati gak nge-hang 30 mnt.
         curl_setopt($ch,CURLOPT_TIMEOUT,0);
         curl_setopt($ch,CURLOPT_LOW_SPEED_LIMIT,1);
-        curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,120);
+        // Deep websearch di dalam gateway bisa sunyi 60-90 dtk tanpa SSE
+        // (bukan socket mati). 120 dtk kepotong pas tool lagi dalem.
+        // 300 dtk = toleran deep, socket beneran mati tetap dibunuh,
+        // batas 30 mnt + ka 150 dtk tetap yang pegang.
+        curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,300);
         curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
         curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
         curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,0);
@@ -1230,7 +1234,8 @@ curl_setopt($ch,CURLOPT_CONNECTTIMEOUT,30);
 // yang pegang. 300 dtk = stream kepotong pas lagi panjang.
 curl_setopt($ch,CURLOPT_TIMEOUT,0);
 curl_setopt($ch,CURLOPT_LOW_SPEED_LIMIT,1);
-curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,120);
+// Deep tool bisa sunyi 60-90 dtk: 120 kepotong, 300 toleran (lihat /runs di atas).
+curl_setopt($ch,CURLOPT_LOW_SPEED_TIME,300);
 curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
 curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
 curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,0);

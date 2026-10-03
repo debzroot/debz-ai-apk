@@ -3087,7 +3087,9 @@ class Agent:
             env["XDG_CONFIG_HOME"] = os.path.join(PROJECT_ROOT, "opencode-bin", ".cfg_home")
             env["XDG_DATA_HOME"] = os.path.join(PROJECT_ROOT, "opencode-bin", ".data_home")
             # PROXY-FREE: opencode CLI selalu direct, tanpa env proxy.
-            stall_lim = 120 if fast else 240
+            # STALL 900s: tool lama tanpa output (CI build/gradle 5-15 mnt
+            # sunyi) BUKAN hang — jangan bunuh. Sesi serve persisten.
+            stall_lim = 120 if fast else 900
 
             import json as _json
             import socket as _sock
