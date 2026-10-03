@@ -78,7 +78,53 @@ if(isset($_GET['action'])&& $_GET['action']=== 'client_log') {
     }
     echo json_encode(['ok' => true,'n' => count($items)]);
     exit;
-}$responsesEndpoint = trim($config['AI_ENDPOINT_RESPONSES']?? '');
+}
+if(isset($_GET['action'])&& $_GET['action']=== 'health') {
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    $logDir = __DIR__.'/logs';
+    $cache = $logDir.'/.health.json';
+    if(is_file($cache)&& time()- (int)@ filemtime($cache)< 5) {
+        $c = @ file_get_contents($cache);
+        if(is_string($c)&& $c !== '') { echo $c; exit; }
+    }
+    $today = date('Ymd');
+    $appLog = $logDir.'/app-'.$today.'.log';
+    $cliStart = is_file($appLog)? (int)@ shell_exec('grep -c "OPENCODE_CLI" '.escapeshellarg($appLog).' 2>/dev/null'): 0;
+    $stallLog = $logDir.'/stall-'.$today.'.log';
+    if(is_file($stallLog))$stallN = (int)trim((string)@ shell_exec('wc -l < '.escapeshellarg($stallLog).' 2>/dev/null'));
+    else $stallN = is_file($appLog)? (int)@ shell_exec('grep -c "direct_stall\\|proxy_hang" '.escapeshellarg($appLog).' 2>/dev/null'): 0;
+    $fpmN = 0; $fpmMax = 16;
+    $mpid = trim((string)@ shell_exec('pgrep -f "php-fpm: master" 2>/dev/null | head -1'));
+    if($mpid !== '' && ctype_digit($mpid)) $fpmN = (int)trim((string)@ shell_exec('ps --ppid '.escapeshellarg($mpid).' -o args= 2>/dev/null | grep -c "pool "'));
+    if($fpmN <= 0) {
+        $ps = @ shell_exec('ps -eo comm,args 2>/dev/null | grep -c "[p]hp-fpm: pool"');
+        if($ps !== null && trim((string)$ps) !== '') $fpmN = (int)trim((string)$ps);
+    }
+    $fc = @ file_get_contents(__DIR__.'/../../rootfs/opt-debz/php-fpm-debz.conf');
+    if(! is_string($fc)|| ! preg_match('/pm\.max_children\s*=\s*(\d+)/',$fc,$mm)) $fc = @ file_get_contents(__DIR__.'/config/webui-fpm.conf');
+    if(is_string($fc)&& preg_match('/pm\.max_children\s*=\s*(\d+)/',$fc,$mm))$fpmMax = (int)$mm[1];
+    $ocVer = ''; $ocCache = sys_get_temp_dir().'/debz-ocver.txt';
+    if(is_file($ocCache)&& time()- (int)@ filemtime($ocCache)< 300)$ocVer = trim((string)@ file_get_contents($ocCache));
+    else {
+        $ocBin = __DIR__.'/opencode-bin/opencode';
+        $ov = @ shell_exec('opencode --version 2>/dev/null || '.escapeshellarg($ocBin).' --version 2>/dev/null');
+        if(is_string($ov)&& trim($ov)!== '') { $ocVer = trim(substr($ov,0,80)); @ file_put_contents($ocCache,$ocVer,LOCK_EX); }
+    }
+    $slowLog = $logDir.'/php-fpm-slow.log';
+    if(! is_file($slowLog))$slowLog = $logDir.'/webui-fpm-slow.log';
+    $slowB = is_file($slowLog)? (int)@ filesize($slowLog): 0;
+    $slowTot = is_file($slowLog)? (int)@ shell_exec('grep -c "pool " '.escapeshellarg($slowLog).' 2>/dev/null'): 0;
+    $slowExp = is_file($slowLog)? (int)@ shell_exec('grep -c "stream_select" '.escapeshellarg($slowLog).' 2>/dev/null'): 0;
+    $ocUp = false;
+    $fp = @ fsockopen('127.0.0.1',4096,$en,$es,1);
+    if(is_resource($fp)) { $ocUp = true; @ fclose($fp); }
+    $out = json_encode(['ok' => true,'ts' => time(),'fpm_workers' => $fpmN,'fpm_max' => $fpmMax,'oc_serve' => $ocUp ? 'up' : 'down','stall_today' => $stallN,'cli_events_today' => $cliStart,'disk_free_b' => @ disk_free_space(__DIR__),'disk_total_b' => @ disk_total_space(__DIR__),'opencode' => $ocVer],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if(is_string($out))@ file_put_contents($cache,$out,LOCK_EX);
+    echo $out;
+    exit;
+}
+$responsesEndpoint = trim($config['AI_ENDPOINT_RESPONSES']?? '');
 if($responsesEndpoint === '') {
     $base = trim($config['AI_ENDPOINT']?? 'https://api.openai.com/v1/chat/completions');
     $responsesEndpoint = preg_replace('#/chat/completions$#','/responses',$base);

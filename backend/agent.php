@@ -50,6 +50,10 @@ function debz_generate_opencode_id(string $prefix): string {
     }
     return $prefix.$hexPart.$base62Part;
 }
+// Single source of truth long-job: sunyi 5-30 mnt bukan hang. Paritas debz-term.py.
+function debz_is_long_job(string $t): bool {
+    return preg_match('/build|gradle|compile|kompil|download|upload|install|\bapt(?:-get)?\b|\bnpm\b|\bpip\b|docker|ffmpeg|youtube|yt-?dlp|tunggu|lama|lanjut|\btest\b|render|convert|backup|\bci[\s\-]/i',$t) === 1;
+}
 // PROXY-FREE BUILD: proxy pool/grabber dibuang total (UI tidak ada opsi proxy,
 // semua request direct). Stub no-op dipertahankan agar call-site lama tetap jalan.
 function debz_proxy_failover(string $proxy,string $reason = '',bool $blacklist = true): void {}
@@ -1514,8 +1518,17 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
         $lastBeat = time();
         $lastDataBeat = time();
         $t0 = time();
-        $cliDeadline = $t0 + 900;
-        $hardCap = $t0 + 1800;
+        // LONG-JOB vs CHAT: samain debz-term.py.
+        $isLong = debz_is_long_job((string)$userText);
+        $idleBase = (int)(getenv('DEBZ_OC_IDLE_S') ?: 900);
+        if($idleBase < 300) $idleBase = 300; if($idleBase > 3600) $idleBase = 3600;
+        $capBase = (int)(getenv('DEBZ_OC_CAP_S') ?: 1800);
+        if($capBase < 600) $capBase = 600;
+        if($isLong) { if($idleBase < 1800) $idleBase = 1800; if($capBase < 3600) $capBase = 3600; }
+        if($capBase < $idleBase + 60) $capBase = $idleBase + 60;
+        $stallLim = $isLong ? max($idleBase, 1800) : $idleBase;
+        $cliDeadline = $t0 + $idleBase;
+        $hardCap = $t0 + $capBase;
         $thinkingSent = false;
         $cliProxyHang = false;
         $lastEventTs = time();
@@ -1536,9 +1549,9 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
             $loopDetected = true;
             if(function_exists('applog'))applog('OPENCODE_CLI','loop_detected',['reason' => $why]);
         };
-        $touchProgress = function()use(& $lastProgressTs,& $cliDeadline): void {
+        $touchProgress = function()use(& $lastProgressTs,& $cliDeadline,$idleBase): void {
             $lastProgressTs = time();
-            $cliDeadline = time()+ 900;
+            $cliDeadline = time()+ $idleBase;
         };
         while(true) {
             $status = proc_get_status($proc);
@@ -1728,14 +1741,12 @@ function native_agent_run_opencode_cli(array $P,array $messagesIn,int $maxTokens
                 $waitS = (int)(time()- $lastProgressTs);
                 if(function_exists('emit'))emit(['type' => 'status','phase' => 'thinking','wait_s' => $waitS]);
             }
-            // STALL 900s: tool lama tanpa output (CI build/gradle 5-15 mnt sunyi)
-            // BUKAN hang — jangan bunuh. Sesi serve persisten, konteks aman.
-            // Frontend tetap dapat :ka/10s + thinking/45s biar tak dikira putus.
-            if($cliProxy === '' && ! $cliProxyHang &&(time()- $lastProgressTs)> 900) {
+            // LONG-JOB sunyi 5-30 mnt bukan hang — limit ikut $stallLim.
+            if($cliProxy === '' && ! $cliProxyHang &&(time()- $lastProgressTs)> $stallLim) {
                 $cliProxyHang = true;
-                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode hang** (900 detik tanpa progres) — proses dihentikan. Konteks sesi aman, ketik `lanjut` untuk meneruskan.\n"]]]]);
-                if(function_exists('termEmit'))termEmit('error','Direct mode diam (900 detik tanpa progres), proses dihentikan.');
-                if(function_exists('applog'))applog('OPENCODE_CLI','direct_stall',['stall' => time()- $lastProgressTs]);
+                if(function_exists('emit'))emit(['choices' =>[['delta' =>['content' => "\n\n⚠️ **opencode hang** (".$stallLim." detik tanpa progres) — proses dihentikan. Konteks sesi aman, ketik `lanjut` untuk meneruskan.\n"]]]]);
+                if(function_exists('termEmit'))termEmit('error','Direct mode diam ('.$stallLim.' detik tanpa progres), proses dihentikan.');
+                if(function_exists('applog'))applog('OPENCODE_CLI','direct_stall',['stall' => time()- $lastProgressTs,'lim' => $stallLim,'long' => $isLong ? 1 : 0]);
                 @ proc_terminate($proc,9);
                 $cliTimedOut = true;
                 break;

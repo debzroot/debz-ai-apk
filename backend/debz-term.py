@@ -26,6 +26,15 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 DEBUG_LOG_PATH = os.path.join(PROJECT_ROOT, "debug.log")
 sys.path = [p for p in sys.path if p]
 
+# Single source of truth long-job.
+_LONG_JOB_RE = re.compile(r"build|gradle|compile|kompil|download|upload|install|\bapt(?:-get)?\b|\bnpm\b|\bpip\b|docker|ffmpeg|youtube|yt-?dlp|tunggu|lama|lanjut|\btest\b|render|convert|backup|\bci[\s\-]", re.I)
+
+def _is_long_job(t):
+    try:
+        return bool(_LONG_JOB_RE.search(t or ""))
+    except Exception:
+        return False
+
 _REQ_LIBS = ("requests", "rich", "prompt_toolkit")
 
 try:
@@ -3086,10 +3095,9 @@ class Agent:
             env = dict(os.environ)
             env["XDG_CONFIG_HOME"] = os.path.join(PROJECT_ROOT, "opencode-bin", ".cfg_home")
             env["XDG_DATA_HOME"] = os.path.join(PROJECT_ROOT, "opencode-bin", ".data_home")
-            # PROXY-FREE: opencode CLI selalu direct, tanpa env proxy.
-            # STALL 900s: tool lama tanpa output (CI build/gradle 5-15 mnt
-            # sunyi) BUKAN hang — jangan bunuh. Sesi serve persisten.
-            stall_lim = 120 if fast else 900
+            # LONG-JOB vs CHAT: build/CI/download sunyi 5-30 mnt BUKAN hang.
+            _is_long = _is_long_job(prompt)
+            stall_lim = 1800 if _is_long else (120 if fast else 900)
 
             import json as _json
             import socket as _sock
@@ -3146,6 +3154,9 @@ class Agent:
                 _oc_hard_cap = int(os.environ.get("DEBZ_OC_CAP_S", "1800") or 1800)
             except Exception:
                 _oc_hard_cap = 1800
+            if _is_long:
+                t_oc_deadline = max(t_oc_deadline, 1800)
+                _oc_hard_cap = max(_oc_hard_cap, 3600)
             _oc_hard_cap = max(t_oc_deadline + 60, _oc_hard_cap)
 
             if serve_url and not self.tools_on:
@@ -3529,7 +3540,7 @@ class Agent:
                 _msg("[red]⚠ direct stall → proses dihentikan[/red]")
                 fail = True
             elif reason == "cli_timeout":
-                et = f"cli timeout (deadline rolling {t_oc_deadline}s / cap 1800s) → proses dihentikan"
+                et = f"cli timeout (deadline rolling {t_oc_deadline}s / cap {_oc_hard_cap}s) → proses dihentikan"
                 _msg_proxy("cli timeout → proses dihentikan", icon="⚠️", color="red")
                 fail = True
 
@@ -3559,7 +3570,9 @@ class Agent:
 
                 if fail:
                     stalls += 1
-                    self._oc_session = ""
+                    _stall_long = "direct stall" in (et or "").lower() and _is_long_job(user_msg)
+                    if not _stall_long:
+                        self._oc_session = ""
                     if attempt < 3:
                         _msg_proxy(f"coba lagi ({attempt + 1}/4)…", icon="🔄", color="yellow")
                         continue

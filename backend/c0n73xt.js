@@ -2010,6 +2010,29 @@
         }
     };
 
+    // Retry 1-klik pas stall/worker-penuh + indikator session-reset eksplisit.
+    window.debzRetryStall = function() {
+        var st = sessionStreams[activeSessionId];
+        if (st && st.busy) { showToast('Masih jalan — stop dulu (tombol kotak) baru retry'); return; }
+        var lastUser = '';
+        for (var k = messages.length - 1; k >= 0; k--) {
+            if (messages[k].role === 'user') { lastUser = messages[k].content; break; }
+        }
+        if (!lastUser || !form) { showToast('Gak ada pesan buat di-retry'); return; }
+        input.value = stripAttachPreview(String(lastUser)).slice(0, MAX_CHARS);
+        form.dispatchEvent(new Event('submit'));
+    };
+    window.debzStallBadge = function(container, kind) {
+        try {
+            if (!container || container.querySelector('.debz-stall-badge')) return;
+            var b = document.createElement('div');
+            b.className = 'debz-stall-badge';
+            b.style.cssText = 'margin-top:8px;padding:6px 10px;border-radius:8px;font-size:12px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.4);color:#fcd34d;';
+            b.textContent = kind === 'worker' ? '⏳ Worker penuh — 16 FPM lagi ketahan long-job. Klik Coba Lagi / tunggu sebentar.' : '🔄 Session ke-reset aman — konteks dibawa, ketik `lanjut` untuk meneruskan.';
+            container.appendChild(b);
+        } catch(e) {}
+    };
+
     /* ==================== EDIT PESAN USER ==================== */
     var editBackup = null;
 
@@ -2567,10 +2590,17 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
 
                 if (!response.ok) {
                     if (window.__clientLog) window.__clientLog('error', 'chat fetch HTTP ' + response.status, { statusText: response.statusText });
+                    var _isBusy = (response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504);
                     if (mySessionId === activeSessionId) {
-                        placeholder.querySelector('.msg-text').innerHTML = '<span style="color:#fca5a5;">⚠️ HTTP Error ' + response.status + ' - ' + response.statusText + '</span>';
+                        var _mt = placeholder.querySelector('.msg-text');
+                        if (_isBusy) {
+                            _mt.innerHTML = '<span style="color:#fcd34d;">⏳ Worker penuh / gateway sibuk (HTTP ' + response.status + ') — FPM lagi ketahan long-job.</span><br><button class="msg-action-btn" onclick="debzRetryStall()">🔄 Coba lagi 1-klik</button> <span style="font-size:11px;opacity:.7;">atau tunggu ~1 mnt lalu kirim ulang</span>';
+                            window.debzStallBadge(_mt, 'worker');
+                        } else {
+                            _mt.innerHTML = '<span style="color:#fca5a5;">⚠️ HTTP Error ' + response.status + ' - ' + response.statusText + '</span><br><button class="msg-action-btn" onclick="debzRetryStall()">🔄 Coba lagi</button>';
+                        }
                     }
-                    mySessionObj.messages[assistantIndex].content = '[error] HTTP ' + response.status;
+                    mySessionObj.messages[assistantIndex].content = '[error] HTTP ' + response.status + (_isBusy ? ' (worker penuh — retry via debzRetryStall)' : '');
                     saveStore();
                     renderSessionList();
                     delete sessionStreams[mySessionId];
@@ -2967,8 +2997,10 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                         var isNetAbort = /abort|bodyStream|network|fetch|load failed/i.test(errDetail || '');
                         var friendlyErr = isNetAbort ? 'Koneksi kepotong sebelum Done padahal agent masih jalan (backend tahan 90 dtk grace, sesi aman di chat yang sama) — ketik `lanjut` untuk meneruskan.' : errDetail;
                         var errText = errBase ? errBase + '\n\n⚠️ ' + friendlyErr : '⚠️ Error: ' + friendlyErr;
+                        var _isStall = /hang|stall|Konteks sesi aman|lanjut/i.test(errText || '');
                         SR.flush(errText, rdItems || [], placeholder.querySelector('.msg-text'));
                         SR.stop();
+                        if (_isStall) { window.debzStallBadge(placeholder.querySelector('.msg-text'), 'reset'); showToast('🔄 Session ke-reset aman — ketik `lanjut`', 4000); }
                         if (approvalCards.length) {
                             approvalCards.forEach(function(c) { placeholder.querySelector('.msg-text').appendChild(c); });
                         }
