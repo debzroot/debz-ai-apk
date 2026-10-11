@@ -21,6 +21,11 @@ $apiKey = $config['AI_API_KEY']?? '';
 $model = $config['AI_MODEL']?? 'gpt-4o-mini';
 require_once __DIR__.'/logger.php';
 applog_rotate();
+function grep_count_php(string $file, string $needle): int {
+    $c = @file_get_contents($file);
+    if(!is_string($c) || $c === '') return 0;
+    return substr_count($c,$needle);
+}
 applog('BOOT','api.php hit',['action' => $_GET['action']?? '-','post_keys' => array_keys($_POST)]);
 require_once __DIR__.'/providers.php';
 $PROVIDERS = providers_load();
@@ -90,10 +95,10 @@ if(isset($_GET['action'])&& $_GET['action']=== 'health') {
     }
     $today = date('Ymd');
     $appLog = $logDir.'/app-'.$today.'.log';
-    $cliStart = is_file($appLog)? (int)@ shell_exec('grep -c "OPENCODE_CLI" '.escapeshellarg($appLog).' 2>/dev/null'): 0;
+    $cliStart = is_file($appLog)? grep_count_php($appLog,'OPENCODE_CLI'): 0;
     $stallLog = $logDir.'/stall-'.$today.'.log';
-    if(is_file($stallLog))$stallN = (int)trim((string)@ shell_exec('wc -l < '.escapeshellarg($stallLog).' 2>/dev/null'));
-    else $stallN = is_file($appLog)? (int)@ shell_exec('grep -c "direct_stall\\|proxy_hang" '.escapeshellarg($appLog).' 2>/dev/null'): 0;
+    if(is_file($stallLog)) { $c = @file($stallLog,FILE_IGNORE_NEW_LINES); $stallN = is_array($c) ? count($c) : 0; }
+    else $stallN = is_file($appLog)? grep_count_php($appLog,'direct_stall') + grep_count_php($appLog,'proxy_hang'): 0;
     $fpmN = 0; $fpmMax = 16;
     $mpid = trim((string)@ shell_exec('pgrep -f "php-fpm: master" 2>/dev/null | head -1'));
     if($mpid !== '' && ctype_digit($mpid)) $fpmN = (int)trim((string)@ shell_exec('ps --ppid '.escapeshellarg($mpid).' -o args= 2>/dev/null | grep -c "pool "'));
@@ -114,14 +119,42 @@ if(isset($_GET['action'])&& $_GET['action']=== 'health') {
     $slowLog = $logDir.'/php-fpm-slow.log';
     if(! is_file($slowLog))$slowLog = $logDir.'/webui-fpm-slow.log';
     $slowB = is_file($slowLog)? (int)@ filesize($slowLog): 0;
-    $slowTot = is_file($slowLog)? (int)@ shell_exec('grep -c "pool " '.escapeshellarg($slowLog).' 2>/dev/null'): 0;
-    $slowExp = is_file($slowLog)? (int)@ shell_exec('grep -c "stream_select" '.escapeshellarg($slowLog).' 2>/dev/null'): 0;
+    $slowTot = is_file($slowLog)? grep_count_php($slowLog,'pool '): 0;
+    $slowExp = is_file($slowLog)? grep_count_php($slowLog,'stream_select'): 0;
     $ocUp = false;
     $fp = @ fsockopen('127.0.0.1',4096,$en,$es,1);
     if(is_resource($fp)) { $ocUp = true; @ fclose($fp); }
-    $out = json_encode(['ok' => true,'ts' => time(),'fpm_workers' => $fpmN,'fpm_max' => $fpmMax,'oc_serve' => $ocUp ? 'up' : 'down','stall_today' => $stallN,'cli_events_today' => $cliStart,'disk_free_b' => @ disk_free_space(__DIR__),'disk_total_b' => @ disk_total_space(__DIR__),'opencode' => $ocVer],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $hbFile = $logDir.'/provider-heartbeat.json';
+    $hb = [];
+    if(is_file($hbFile)) { $hj = json_decode((string)@file_get_contents($hbFile),true); if(is_array($hj)) $hb = $hj; }
+    $out = json_encode(['ok' => true,'ts' => time(),'fpm_workers' => $fpmN,'fpm_max' => $fpmMax,'oc_serve' => $ocUp ? 'up' : 'down','stall_today' => $stallN,'cli_events_today' => $cliStart,'disk_free_b' => @ disk_free_space(__DIR__),'disk_total_b' => @ disk_total_space(__DIR__),'opencode' => $ocVer,'provider_heartbeat' => $hb],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if(is_string($out))@ file_put_contents($cache,$out,LOCK_EX);
     echo $out;
+    exit;
+}
+if(isset($_GET['action'])&& $_GET['action']=== 'sessions_index') {
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    try {
+        $db = new PDO('sqlite:'.__DIR__.'/notes.db');
+        $db->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
+        $rows = [];
+        try {
+            $st = $db->query("SELECT sid, title, updated_at, msgs FROM sessions_idx ORDER BY updated_at DESC LIMIT 200");
+            if($st) $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        } catch(Throwable $e) { $rows = []; }
+        if(!$rows) {
+            foreach(glob(__DIR__.'/sessions/session_*.json') ?: [] as $f) {
+                $rows[] = ['sid' => basename($f,'.json'),'title' => basename($f,'.json'),'updated_at' => (int)@filemtime($f),'msgs' => 0];
+            }
+            usort($rows,function($a,$b){ return ($b['updated_at'] ?? 0) <=> ($a['updated_at'] ?? 0); });
+            $rows = array_slice($rows,0,200);
+        }
+        echo json_encode(['sessions' => $rows,'count' => count($rows),'source' => 'sessions_idx'],JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch(Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
     exit;
 }
 $responsesEndpoint = trim($config['AI_ENDPOINT_RESPONSES']?? '');

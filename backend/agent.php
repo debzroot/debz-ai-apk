@@ -231,7 +231,7 @@ function native_retry_state_clear(string $key): void {
 function native_chat_once(string $baseUrl,string $apiKey,string $model,array $messages,array $tools,int $maxTokens,array $opts = []): array {
     $attempt = 0;
     $stripRD = ! empty($opts['strip_reasoning_details']);
-    $maxRetry = isset($opts['_maxRetry'])? max(0,(int)$opts['_maxRetry']): max(0,native_config_int('AI_NET_RETRY',30));
+    $maxRetry = isset($opts['_maxRetry'])? max(0,(int)$opts['_maxRetry']): max(0,native_config_int('AI_NET_RETRY',5));
     $stallRetries = 0;
     $maxStallRetry = max(0,native_config_int('AI_STALL_RETRY',10));
     $resumeOn = native_config_int('AI_RESUME_PARTIAL',1)=== 1;
@@ -2180,6 +2180,7 @@ function native_note_upsert(string $key,string $content): void {
     try {
         $db = new PDO('sqlite:'.__DIR__.'/notes.db');
         $db->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
+        $db->exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;");
         $db->exec("CREATE TABLE IF NOT EXISTS notes (key TEXT PRIMARY KEY, content TEXT, updated_at TEXT)");
         $st = $db->prepare("INSERT INTO notes (key, content, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET content = excluded.content, updated_at = datetime('now')");
         $st->execute([$key,$content]);
@@ -2256,6 +2257,7 @@ function native_prompt_db(): PDO {
         $db = new PDO('sqlite:'.__DIR__.'/notes.db');
         $db->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
         $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE,PDO::FETCH_ASSOC);
+        try { $db->exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;"); } catch(Throwable $e) {}
     }
     return $db;
 }

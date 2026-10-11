@@ -33,25 +33,27 @@
 function applog_perf(string $op,int $ms,array $extra = []) {
     return applog('PERF',$op,['ms' => $ms] + $extra,'info');
 }
-function applog_rotate() {
-    if(random_int(1,200)!== 1)return;
+function applog_rotate($force = false) {
+    if(!$force && random_int(1,30)!== 1)return;
     $dir = __DIR__.'/logs';
     foreach(glob($dir.'/{app,stall,agent,perf,json,debug}-*.log',GLOB_BRACE)?:[]as $f) {
         $m = [];
         if(preg_match('/(app|stall|agent|perf|json|debug)-(\d{8})\.log$/',$f,$m)&& isset($m[2])) {
-            if(strtotime($m[2])< time()- 14 * 86400)@ unlink($f);
+            if(strtotime($m[2])< time()- 7 * 86400)@ unlink($f);
         }
     }
     foreach(glob($dir.'/sess-*.log') ?: [] as $sf) {
         if(@filemtime($sf) < time() - 3 * 86400) @unlink($sf);
-        elseif(@filesize($sf) > 5 * 1048576) @file_put_contents($sf,'');
+        elseif(@filesize($sf) > 2 * 1048576) @file_put_contents($sf,'');
     }
     $slow = $dir.'/webui-fpm-slow.log';
-    if(is_file($slow)&& @ filesize($slow)> 5 * 1048576)@ file_put_contents($slow,'');
-    // Active log truncate (>5MB, bukan unlink — fd masih dipegang proses).
-    foreach(['nginx-access.log','nginx-error.log','oc-serve.log','webui-fpm.log','pw_daemon.log','dns_proxy.log','backend.log','watchdog.log','xvfb.log'] as $n) {
+    if(is_file($slow)&& @ filesize($slow)> 2 * 1048576)@ file_put_contents($slow,'');
+    foreach(['nginx-access.log','nginx-error.log','oc-serve.log','webui-fpm.log','pw_daemon.log','dns_proxy.log','backend.log','watchdog.log','xvfb.log','provider-heartbeat.log'] as $n) {
         $p = $dir.'/'.$n;
-        if(is_file($p)&& @ filesize($p)> 5 * 1048576)@ file_put_contents($p,'');
+        if(is_file($p)&& @ filesize($p)> 2 * 1048576) {
+            @rename($p,$p.'.1');
+            @file_put_contents($p,'');
+        }
     }
     $dbg = __DIR__.'/debug.log';
     if(is_file($dbg) && @filesize($dbg) > 512 * 1024) {
@@ -73,7 +75,10 @@ function applog_rotate() {
     $sumLog = $dir.'/summarizer.log';
     if(is_file($sumLog)&& @ filesize($sumLog)> 1 * 1048576)@ file_put_contents($sumLog,'');
     foreach(glob($dir.'/{app,agent,perf,json}-'.date('Ymd').'.log',GLOB_BRACE)?:[]as $today) {
-        if(@ filesize($today)> 5 * 1048576)@ file_put_contents($today,'');
+        if(@ filesize($today)> 2 * 1048576) {
+            @rename($today,$today.'.1');
+            @file_put_contents($today,'');
+        }
     }
     $lock = sys_get_temp_dir().'/debz_summarizer.lock';
     if(! is_file($lock)|| time()- (int)@ filemtime($lock)> 1800) {

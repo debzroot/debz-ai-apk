@@ -145,7 +145,18 @@ def is_dangerous(command: str) -> Optional[str]:
 
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "healthy", "service": "c0n73xt-tool-server", "version": "2.0-flask"})
+    return jsonify({"status": "healthy", "service": "c0n73xt-tool-server", "version": "2.1-flask-wal"})
+
+def _db_connect(path: str, timeout: float = 10):
+    conn = _sqlite3.connect(path, timeout=timeout, check_same_thread=False, isolation_level=None)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+    except Exception:
+        pass
+    return conn
 
 def _auth() -> Optional[tuple]:
     body = {}
@@ -584,7 +595,7 @@ def api_db():
     if not sql:
         return jsonify({"error": "sql kosong"}), 400
     try:
-        conn = _sqlite3.connect(db_path, timeout=5)
+        conn = _db_connect(db_path, timeout=10)
         conn.row_factory = _sqlite3.Row
         cur = conn.cursor()
         if isinstance(params, dict):
@@ -768,8 +779,9 @@ def _notes_ensure_seeds(conn):
 
 
 def _notes_conn():
-    conn = _sqlite3.connect(_NOTES_DB, timeout=5)
+    conn = _db_connect(_NOTES_DB, timeout=10)
     conn.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, content TEXT, updated_at TEXT DEFAULT (datetime('now')))")
+    conn.execute("CREATE TABLE IF NOT EXISTS sessions_idx (sid TEXT PRIMARY KEY, title TEXT, updated_at INTEGER, msgs INTEGER)")
     conn.commit()
     _notes_ensure_seeds(conn)
     return conn
@@ -821,6 +833,77 @@ def api_note():
             conn.close()
         except Exception:
             pass
+        return jsonify({"error": str(e)}), 500
+
+
+_SESSIONS_DIR = Path(__file__).resolve().parent / "sessions"
+
+def _sessions_rebuild(conn=None):
+    close = False
+    if conn is None:
+        conn = _notes_conn()
+        close = True
+    n = 0
+    try:
+        if _SESSIONS_DIR.is_dir():
+            for f in sorted(_SESSIONS_DIR.glob("session_*.json")):
+                try:
+                    st = f.stat()
+                    raw = f.read_text(encoding="utf-8", errors="replace")
+                    title = f.stem[:80]
+                    msgs = 0
+                    try:
+                        j = json.loads(raw)
+                        if isinstance(j, dict):
+                            t = str(j.get("title", "") or j.get("name", "")).strip()
+                            if t:
+                                title = t[:80]
+                            m = j.get("messages")
+                            if isinstance(m, list):
+                                msgs = len(m)
+                    except Exception:
+                        pass
+                    conn.execute("INSERT INTO sessions_idx (sid, title, updated_at, msgs) VALUES (?, ?, ?, ?) ON CONFLICT(sid) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at, msgs=excluded.msgs", (f.stem, title, int(st.st_mtime), msgs))
+                    n += 1
+                except Exception:
+                    continue
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    finally:
+        if close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return n
+
+
+@app.get("/api/sessions_index")
+def api_sessions_index():
+    deny = _auth()
+    if deny:
+        return deny
+    try:
+        conn = _notes_conn()
+        cur = conn.execute("SELECT sid, title, updated_at, msgs FROM sessions_idx ORDER BY updated_at DESC LIMIT 200")
+        rows = [{"sid": r[0], "title": r[1], "updated_at": r[2], "msgs": r[3]} for r in cur.fetchall()]
+        conn.close()
+        return jsonify({"sessions": rows, "count": len(rows)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/sessions_index")
+def api_sessions_rebuild():
+    deny = _auth()
+    if deny:
+        return deny
+    try:
+        n = _sessions_rebuild()
+        return jsonify({"ok": True, "indexed": n}), 200
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 

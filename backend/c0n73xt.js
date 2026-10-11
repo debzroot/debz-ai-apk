@@ -2578,29 +2578,63 @@ var historyPayload = [{ role: 'system', content: systemPrompt }].concat(
                             } } };
                     }
                 }
+                async function fetchChatWithBackoff(url, opts, maxRetries) {
+                    maxRetries = (typeof maxRetries === 'number') ? maxRetries : 3;
+                    var attempt = 0, lastErr = null, lastResp = null;
+                    while (true) {
+                        try {
+                            var r = await fetch(url, opts);
+                            if (r.ok) return r;
+                            lastResp = r;
+                            if ([429, 502, 503, 504].indexOf(r.status) === -1 || attempt >= maxRetries) return r;
+                            lastErr = new Error('HTTP ' + r.status);
+                        } catch (e) {
+                            lastErr = e;
+                            if (opts && opts.signal && opts.signal.aborted) throw e;
+                            if (attempt >= maxRetries) throw e;
+                        }
+                        attempt++;
+                        var delay = Math.min(8000, 1000 * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 400);
+                        try { showProgress('⏳', 'Gateway sibuk — retry ' + attempt + '/' + maxRetries + ' (' + (delay / 1000).toFixed(1) + 's)...'); } catch (e2) {}
+                        try { if (window.__clientLog) window.__clientLog('warn', 'chat fetch retry ' + attempt, { delay: delay }); } catch (e3) {}
+                        await new Promise(function(res, rej) {
+                            var t = setTimeout(res, delay);
+                            if (opts && opts.signal) {
+                                if (opts.signal.aborted) { clearTimeout(t); rej(new DOMException('aborted', 'AbortError')); return; }
+                                opts.signal.addEventListener('abort', function() { clearTimeout(t); rej(new DOMException('aborted', 'AbortError')); }, { once: true });
+                            }
+                        });
+                    }
+                }
                 if (!useNative) {
-                    response = await fetch(API_URL, {
-                        method: 'POST',
-                        signal: abortController.signal,
-                        body: formData,
-                        cache: 'no-store',
-                        headers: { 'Accept': 'text/event-stream' }
-                    });
+                    try {
+                        response = await fetchChatWithBackoff(API_URL, {
+                            method: 'POST',
+                            signal: abortController.signal,
+                            body: formData,
+                            cache: 'no-store',
+                            headers: { 'Accept': 'text/event-stream' }
+                        }, 3);
+                    } catch (netErr) {
+                        if (abortController.signal.aborted) throw netErr;
+                        response = { ok: false, status: 0, statusText: String((netErr && netErr.message) || 'network error') };
+                    }
                 }
 
-                if (!response.ok) {
-                    if (window.__clientLog) window.__clientLog('error', 'chat fetch HTTP ' + response.status, { statusText: response.statusText });
-                    var _isBusy = (response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504);
+                if (!response || !response.ok) {
+                    var _st = response ? response.status : 0;
+                    if (window.__clientLog) window.__clientLog('error', 'chat fetch HTTP ' + _st, { statusText: response ? response.statusText : 'no-response' });
+                    var _isBusy = (_st === 0 || _st === 429 || _st === 502 || _st === 503 || _st === 504);
                     if (mySessionId === activeSessionId) {
                         var _mt = placeholder.querySelector('.msg-text');
                         if (_isBusy) {
-                            _mt.innerHTML = '<span style="color:#fcd34d;">⏳ Worker penuh / gateway sibuk (HTTP ' + response.status + ') — FPM lagi ketahan long-job.</span><br><button class="msg-action-btn" onclick="debzRetryStall()">🔄 Coba lagi 1-klik</button> <span style="font-size:11px;opacity:.7;">atau tunggu ~1 mnt lalu kirim ulang</span>';
+                            _mt.innerHTML = '<span style="color:#fcd34d;">⏳ Worker penuh / gateway sibuk (HTTP ' + _st + ') — auto-retry 3x gagal, FPM lagi ketahan long-job.</span><br><button class="msg-action-btn" onclick="debzRetryStall()">🔄 Coba lagi 1-klik</button> <span style="font-size:11px;opacity:.7;">atau tunggu ~1 mnt lalu kirim ulang</span>';
                             window.debzStallBadge(_mt, 'worker');
                         } else {
-                            _mt.innerHTML = '<span style="color:#fca5a5;">⚠️ HTTP Error ' + response.status + ' - ' + response.statusText + '</span><br><button class="msg-action-btn" onclick="debzRetryStall()">🔄 Coba lagi</button>';
+                            _mt.innerHTML = '<span style="color:#fca5a5;">⚠️ HTTP Error ' + _st + ' - ' + (response ? response.statusText : 'network') + '</span><br><button class="msg-action-btn" onclick="debzRetryStall()">🔄 Coba lagi</button>';
                         }
                     }
-                    mySessionObj.messages[assistantIndex].content = '[error] HTTP ' + response.status + (_isBusy ? ' (worker penuh — retry via debzRetryStall)' : '');
+                    mySessionObj.messages[assistantIndex].content = '[error] HTTP ' + _st + (_isBusy ? ' (worker penuh — retry via debzRetryStall)' : '');
                     saveStore();
                     renderSessionList();
                     delete sessionStreams[mySessionId];
